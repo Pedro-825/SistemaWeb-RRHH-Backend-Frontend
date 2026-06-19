@@ -14,6 +14,10 @@ Este proyecto fue desarrollado como parte de una aplicación práctica universit
 
 
 
+Nombre de la Base de datos a crear en PostgreeSQL: sangabriel\_db\_rrhh
+
+
+
 \## Objetivos
 
 
