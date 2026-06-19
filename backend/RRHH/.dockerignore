@@ -1,0 +1,11 @@
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.iml
+.idea/
+.vscode/
+*.log
+.DS_Store
+node_modules/

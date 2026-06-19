@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rrhh-postgres
+    environment:
+      POSTGRES_DB: sangabriel_db_rrhh
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: jenner0125
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend/RRHH
+      dockerfile: Dockerfile
+    container_name: rrhh-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/sangabriel_db_rrhh
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: jenner0125
+      JWT_SECRET: xJdVrQh3dvuoaAYZXC8cAj0s8mxpC/p202i0YYgPP4k=
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend/rrhh-frontend
+      dockerfile: Dockerfile
+    container_name: rrhh-frontend
+    ports:
+    - "3000:80"
+    depends_on:
+      - backend
+
+  backup:
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    container_name: rrhh-backup
+    depends_on:
+      - postgres
+    volumes:
+      - backup_data:/backups
+
+volumes:
+  postgres_data:
+  backup_data:

@@ -1,0 +1,215 @@
+.twofa-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.twofa-content {
+  background: #ffffff;
+  width: 380px;
+  max-width: 90%;
+  padding: 30px 25px;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  text-align: center;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.twofa-content h2 {
+  margin: 0 0 8px;
+  color: #0d6efd;
+  font-size: 22px;
+}
+
+.twofa-subtitle {
+  color: #666;
+  margin-bottom: 25px;
+  font-size: 14px;
+}
+
+.twofa-code-box {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 25px;
+}
+
+.twofa-code-box input {
+  width: 50px;
+  height: 55px;
+  font-size: 24px;
+  text-align: center;
+  border: 2px solid #ddd;
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.twofa-code-box input:focus {
+  border-color: #0d6efd;
+  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.2);
+}
+
+.twofa-timer {
+  color: #0d6efd;
+  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+
+.twofa-attempts {
+  color: #555;
+  margin-bottom: 15px;
+  font-size: 14px;
+}
+
+.twofa-attempts span {
+  font-weight: bold;
+  color: #d9534f;
+}
+
+.twofa-error {
+  color: #d9534f;
+  background: #fce4e4;
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 15px;
+  border: 1px solid #f5c6cb;
+}
+
+.twofa-button {
+  width: 100%;
+  padding: 12px;
+  background: #0d6efd;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.twofa-button:hover {
+  background: #084cdf;
+}
+
+.twofa-button:disabled {
+  background: #adb5bd;
+  cursor: not-allowed;
+}
+
+/* ══════════════════════════════════════════════════════
+   NUEVO DISEÑO (ZIP) — clases usadas en TwoFA.jsx
+══════════════════════════════════════════════════════ */
+.twofa-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 24px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.twofa-card {
+  background: #ffffff;
+  width: 420px;
+  max-width: 100%;
+  padding: 40px 36px 32px;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+  text-align: center;
+  animation: slideUp 0.25s ease-out;
+}
+
+.twofa-lock-wrap {
+  font-size: 40px;
+  margin-bottom: 16px;
+  display: block;
+}
+
+.twofa-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0 0 8px;
+}
+
+.twofa-subtitle {
+  color: #64748b;
+  font-size: 13.5px;
+  line-height: 1.5;
+  margin-bottom: 18px;
+}
+
+.twofa-info-box {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  color: #1d4ed8;
+  margin-bottom: 20px;
+  text-align: left;
+}
+
+.twofa-code-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+  display: block;
+}
+
+.twofa-resend {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px;
+  background: none;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #475569;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.twofa-resend:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.twofa-hint {
+  margin-top: 16px;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.5;
+}
