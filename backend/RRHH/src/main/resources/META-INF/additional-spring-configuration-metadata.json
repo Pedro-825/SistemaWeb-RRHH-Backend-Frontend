@@ -1,0 +1,119 @@
+{
+  "properties": [
+    {
+      "name": "azure.storage.connection-string",
+      "type": "java.lang.String",
+      "description": "Connection string de Azure Blob Storage. Vacío en local → usa disco. En producción poner la cadena real de Azure."
+    },
+    {
+      "name": "azure.storage.container-name",
+      "type": "java.lang.String",
+      "description": "Nombre del contenedor en Azure Blob Storage donde se guardan las evidencias."
+    },
+    {
+      "name": "app.frontend-url",
+      "type": "java.lang.String",
+      "description": "URL del frontend (usado en CORS). En prod: URL de Azure Static Web Apps."
+    },
+    {
+      "name": "app.upload-dir",
+      "type": "java.lang.String",
+      "description": "Directorio donde se guardan las evidencias de justificaciones."
+    },
+    {
+      "name": "cookie.secure",
+      "type": "java.lang.Boolean",
+      "description": "Si true, la cookie JWT solo se envía por HTTPS. Activar en producción."
+    },
+    {
+      "name": "cookie.same-site",
+      "type": "java.lang.String",
+      "description": "Política SameSite de la cookie JWT. Usar 'None' en prod (cross-site Azure), 'Lax' en local."
+    },
+    {
+      "name": "sistema.nombre-empresa",
+      "type": "java.lang.String",
+      "description": "Nombre de la empresa que aparece en reportes y correos."
+    },
+    {
+      "name": "sistema.max-intentos-login",
+      "type": "java.lang.Integer",
+      "description": "Número máximo de intentos fallidos antes de bloquear la cuenta."
+    },
+    {
+      "name": "sistema.zona-horaria",
+      "type": "java.lang.String",
+      "description": "Zona horaria del sistema (ej. America/Lima)."
+    },
+    {
+      "name": "rrhh.salario-minimo",
+      "type": "java.math.BigDecimal",
+      "description": "Salario mínimo vital vigente (RMV)."
+    },
+    {
+      "name": "rrhh.rmv",
+      "type": "java.math.BigDecimal",
+      "description": "Remuneración mínima vital usada para calcular bonificaciones."
+    },
+    {
+      "name": "rrhh.bonif-familiar",
+      "type": "java.math.BigDecimal",
+      "description": "Porcentaje de bonificación familiar sobre la RMV."
+    },
+    {
+      "name": "rrhh.bonif-nocturno",
+      "type": "java.math.BigDecimal",
+      "description": "Porcentaje de bonificación por turno nocturno."
+    },
+    {
+      "name": "rrhh.bonif-guardia",
+      "type": "java.math.BigDecimal",
+      "description": "Monto fijo de bonificación por guardia."
+    },
+    {
+      "name": "rrhh.bonif-riesgo",
+      "type": "java.math.BigDecimal",
+      "description": "Porcentaje de bonificación por riesgo."
+    },
+    {
+      "name": "rrhh.bonif-cargo",
+      "type": "java.math.BigDecimal",
+      "description": "Porcentaje de bonificación por cargo."
+    },
+    {
+      "name": "rrhh.tasa-descuento-ley",
+      "type": "java.math.BigDecimal",
+      "description": "Tasa de descuento por ley (ONP)."
+    },
+    {
+      "name": "rrhh.tasa-descuento-afp",
+      "type": "java.math.BigDecimal",
+      "description": "Tasa de descuento por AFP."
+    },
+    {
+      "name": "rrhh.tasa-hora-extra1-5",
+      "type": "java.math.BigDecimal",
+      "description": "Multiplicador para horas extra al 50%."
+    },
+    {
+      "name": "rrhh.tasa-hora-extra2-0",
+      "type": "java.math.BigDecimal",
+      "description": "Multiplicador para horas extra al 100%."
+    },
+    {
+      "name": "rrhh.umbral-horas-dobles",
+      "type": "java.lang.Integer",
+      "description": "Horas extra a partir de las cuales se aplica tasa doble."
+    },
+    {
+      "name": "jwt.secret",
+      "type": "java.lang.String",
+      "description": "Clave secreta para firmar los tokens JWT."
+    },
+    {
+      "name": "jwt.expiration",
+      "type": "java.lang.Long",
+      "description": "Tiempo de expiración del token JWT en milisegundos."
+    }
+  ]
+}

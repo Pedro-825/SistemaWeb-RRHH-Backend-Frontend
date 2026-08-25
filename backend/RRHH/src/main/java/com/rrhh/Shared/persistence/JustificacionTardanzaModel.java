@@ -12,7 +12,7 @@ public class JustificacionTardanzaModel {
     @Column(name = "id_justificacion")
     private Integer idJustificacion;
 
-    @Column(name = "id_registro_asistencia", nullable = false)
+    @Column(name = "id_registro_asistencia", nullable = true)
     private Integer idRegistroAsistencia;
 
     @Column(name = "id_empleado", nullable = false)
@@ -39,11 +39,26 @@ public class JustificacionTardanzaModel {
     @Column(name = "comentario_revision", length = 500)
     private String comentarioRevision;
 
+    @Column(name = "correccion_registrada")
+    private Boolean correccionRegistrada = false;
+
+    @Transient
+    private String nombreEmpleado;
+
     @Transient
     private String horaEntrada;
 
     @Transient
     private String fechaAsistencia;
+
+    @Transient
+    private String horaEntradaEsperada;
+
+    @Transient
+    private Integer minutosTardanza;
+
+    @Transient
+    private String tipoIncidencia;
 
     public JustificacionTardanzaModel() {}
 
@@ -77,9 +92,24 @@ public class JustificacionTardanzaModel {
     public String getComentarioRevision() { return comentarioRevision; }
     public void setComentarioRevision(String comentarioRevision) { this.comentarioRevision = comentarioRevision; }
 
+    public Boolean getCorreccionRegistrada() { return correccionRegistrada; }
+    public void setCorreccionRegistrada(Boolean correccionRegistrada) { this.correccionRegistrada = correccionRegistrada; }
+
+    public String getNombreEmpleado() { return nombreEmpleado; }
+    public void setNombreEmpleado(String nombreEmpleado) { this.nombreEmpleado = nombreEmpleado; }
+
     public String getHoraEntrada() { return horaEntrada; }
     public void setHoraEntrada(String horaEntrada) { this.horaEntrada = horaEntrada; }
 
     public String getFechaAsistencia() { return fechaAsistencia; }
     public void setFechaAsistencia(String fechaAsistencia) { this.fechaAsistencia = fechaAsistencia; }
+
+    public String getHoraEntradaEsperada() { return horaEntradaEsperada; }
+    public void setHoraEntradaEsperada(String horaEntradaEsperada) { this.horaEntradaEsperada = horaEntradaEsperada; }
+
+    public Integer getMinutosTardanza() { return minutosTardanza; }
+    public void setMinutosTardanza(Integer minutosTardanza) { this.minutosTardanza = minutosTardanza; }
+
+    public String getTipoIncidencia() { return tipoIncidencia; }
+    public void setTipoIncidencia(String tipoIncidencia) { this.tipoIncidencia = tipoIncidencia; }
 }

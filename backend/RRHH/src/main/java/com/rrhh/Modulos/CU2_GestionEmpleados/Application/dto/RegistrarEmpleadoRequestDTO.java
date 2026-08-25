@@ -38,6 +38,10 @@ public class RegistrarEmpleadoRequestDTO {
 
     @NotBlank(message = "El cargo es obligatorio")
     private String cargo;
+
+    @NotBlank(message = "El rol es obligatorio")
+    private String rol;
+
     private String tipoContrato;
     private LocalDate fechaInicio;
     private LocalDate fechaFin;
@@ -143,6 +147,14 @@ public class RegistrarEmpleadoRequestDTO {
 
     public void setCargo(String cargo) {
         this.cargo = cargo;
+    }
+
+    public String getRol() {
+        return rol;
+    }
+
+    public void setRol(String rol) {
+        this.rol = rol;
     }
 
     public String getTipoContrato() {

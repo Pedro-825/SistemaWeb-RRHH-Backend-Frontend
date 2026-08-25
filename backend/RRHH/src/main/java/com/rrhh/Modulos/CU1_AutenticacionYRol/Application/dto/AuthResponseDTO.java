@@ -8,6 +8,10 @@ public class AuthResponseDTO {
     private String token;
     private boolean requires2FASetup;
     private boolean requiereCambioPassword;
+    private boolean dosFaYaConfigurado;
+    private Long idEmpleado;
+    private boolean appMovilInstalada;
+    private String nombreUsuario;
 
     public AuthResponseDTO(boolean success, String message) {
         this.success = success;
@@ -86,4 +90,21 @@ public class AuthResponseDTO {
     public void setRequiereCambioPassword(boolean requiereCambioPassword) {
         this.requiereCambioPassword = requiereCambioPassword;
     }
+
+    public boolean isDosFaYaConfigurado() { return dosFaYaConfigurado; }
+    public void setDosFaYaConfigurado(boolean dosFaYaConfigurado) { this.dosFaYaConfigurado = dosFaYaConfigurado; }
+
+    public Long getIdEmpleado() {
+        return idEmpleado;
+    }
+
+    public void setIdEmpleado(Long idEmpleado) {
+        this.idEmpleado = idEmpleado;
+    }
+
+    public boolean isAppMovilInstalada() { return appMovilInstalada; }
+    public void setAppMovilInstalada(boolean appMovilInstalada) { this.appMovilInstalada = appMovilInstalada; }
+
+    public String getNombreUsuario() { return nombreUsuario; }
+    public void setNombreUsuario(String nombreUsuario) { this.nombreUsuario = nombreUsuario; }
 }

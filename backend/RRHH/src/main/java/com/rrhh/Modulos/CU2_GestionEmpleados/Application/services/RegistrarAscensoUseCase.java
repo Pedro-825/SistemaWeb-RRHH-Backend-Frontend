@@ -1,7 +1,5 @@
 package com.rrhh.Modulos.CU2_GestionEmpleados.Application.services;
 
-import com.rrhh.Modulos.CU1_AutenticacionYRol.Application.services.RolAsignacionService;
-
 import com.rrhh.Modulos.CU2_GestionEmpleados.Application.dto.EmpleadoResponseDTO;
 import com.rrhh.Modulos.CU2_GestionEmpleados.Application.dto.RegistrarAscensoRequestDTO;
 
@@ -33,24 +31,23 @@ public class RegistrarAscensoUseCase {
 
     private final IRolRepository rolRepository;
 
-    private final RolAsignacionService rolAsignacionService;
-
     private final AuditoriaEmpleadoService auditoriaEmpleadoService;
 
-    public RegistrarAscensoUseCase(IEmpleadoRepository empleadoRepository, IContratoRepository contratoRepository, IDepartamentoRepository departamentoRepository, IUsuarioGestionRepository usuarioRepository, IRolRepository rolRepository, RolAsignacionService rolAsignacionService, AuditoriaEmpleadoService auditoriaEmpleadoService) {
+    public RegistrarAscensoUseCase(IEmpleadoRepository empleadoRepository, IContratoRepository contratoRepository, IDepartamentoRepository departamentoRepository, IUsuarioGestionRepository usuarioRepository, IRolRepository rolRepository, AuditoriaEmpleadoService auditoriaEmpleadoService) {
         this.empleadoRepository = empleadoRepository;
         this.contratoRepository = contratoRepository;
         this.departamentoRepository = departamentoRepository;
         this.usuarioRepository = usuarioRepository;
         this.rolRepository = rolRepository;
-        this.rolAsignacionService = rolAsignacionService;
         this.auditoriaEmpleadoService = auditoriaEmpleadoService;
     }
 
     @Transactional
     public EmpleadoResponseDTO ejecutar(
             Long idEmpleado,
-            RegistrarAscensoRequestDTO dto
+            RegistrarAscensoRequestDTO dto,
+            Long idEmpleadoActor,
+            String rolActor
     ) {
 
         Empleado empleado =
@@ -75,10 +72,10 @@ public class RegistrarAscensoUseCase {
             );
         }
 
-        if (dto == null || dto.getNuevoCargo() == null || dto.getNuevoCargo().isBlank()) {
+        if (dto == null) {
             return new EmpleadoResponseDTO(
                     false,
-                    "Debe ingresar el nuevo cargo del empleado",
+                    "Debe ingresar el nuevo cargo o el nuevo rol del empleado",
                     empleado.getIdEmpleado(),
                     empleado.getNombres() + " " + empleado.getApellidos(),
                     null,
@@ -87,6 +84,47 @@ public class RegistrarAscensoUseCase {
                     null,
                     null,
                     empleado.getEstado()
+            );
+        }
+
+        if (dto.getNuevoRol() == null || dto.getNuevoRol().isBlank()) {
+            return new EmpleadoResponseDTO(
+                    false,
+                    "Debe seleccionar el nuevo rol del empleado (RRHH, GERENCIA o EMPLEADO)",
+                    empleado.getIdEmpleado(),
+                    empleado.getNombres() + " " + empleado.getApellidos(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    empleado.getEstado()
+            );
+        }
+
+        UsuarioGestion usuario =
+                usuarioRepository.findByEmpleadoId(idEmpleado);
+
+        String rolAnterior = usuario != null ? usuario.getNombreRol() : null;
+
+        Rol rol =
+                rolRepository.findByNombreRol(dto.getNuevoRol());
+
+        if (rol == null) {
+            throw new RuntimeException("Rol no encontrado: " + dto.getNuevoRol());
+        }
+
+        if (debeBloquearCambioPropio(idEmpleadoActor, idEmpleado, rolAnterior, rol.getNombreRol())) {
+            return respuestaRechazada(
+                    empleado,
+                    "No puede cambiar su propio rol. Solicite el cambio a otro responsable autorizado."
+            );
+        }
+
+        if (debeBloquearCambioEntreRrhh(idEmpleadoActor, idEmpleado, rolActor, rolAnterior, rol.getNombreRol(), dto.getNuevoCargo())) {
+            return respuestaRechazada(
+                    empleado,
+                    "Un usuario RRHH no puede modificar el cargo o rol de otro usuario RRHH."
             );
         }
 
@@ -120,35 +158,16 @@ public class RegistrarAscensoUseCase {
             departamentoNuevo.setNombre(contrato.getNombreDepartamento());
         }
 
-        String nuevoCargo = dto.getNuevoCargo();
-
-        contrato.cambiarCargo(nuevoCargo);
+        if (dto.getNuevoCargo() != null && !dto.getNuevoCargo().isBlank()) {
+            contrato.cambiarCargo(dto.getNuevoCargo());
+        }
 
         Contrato contratoActualizado =
                 contratoRepository.save(contrato);
 
-        UsuarioGestion usuario =
-                usuarioRepository.findByEmpleadoId(idEmpleado);
-
-        String rolAnterior = null;
         String rolNuevo = null;
 
         if (usuario != null) {
-
-            rolAnterior = usuario.getNombreRol();
-
-            String nombreRolCalculado =
-                    rolAsignacionService.determinarRol(
-                            departamentoNuevo.getNombre(),
-                            nuevoCargo
-                    );
-
-            Rol rol =
-                    rolRepository.findByNombreRol(nombreRolCalculado);
-
-            if (rol == null) {
-                throw new RuntimeException("Rol no encontrado: " + nombreRolCalculado);
-            }
 
             usuario.setIdRol(rol.getIdRol());
             usuario.setNombreRol(rol.getNombreRol());
@@ -183,7 +202,7 @@ public class RegistrarAscensoUseCase {
         auditoriaEmpleadoService.registrar(
                 empleado.getIdEmpleado(),
                 "ASCENSO_EMPLEADO",
-                "CONTRATO",
+                "EMPLEADO",
                 valorAnterior,
                 valorNuevo
         );
@@ -198,6 +217,55 @@ public class RegistrarAscensoUseCase {
                 contratoActualizado.getCargo(),
                 contratoActualizado.getNombreDepartamento(),
                 rolNuevo,
+                empleado.getEstado()
+        );
+    }
+
+    private boolean debeBloquearCambioPropio(Long idEmpleadoActor, Long idEmpleado, String rolAnterior, String rolNuevo) {
+        return idEmpleadoActor != null
+                && idEmpleadoActor.equals(idEmpleado)
+                && !normalizarRol(rolAnterior).equals(normalizarRol(rolNuevo));
+    }
+
+    private boolean debeBloquearCambioEntreRrhh(
+            Long idEmpleadoActor,
+            Long idEmpleado,
+            String rolActor,
+            String rolAnterior,
+            String rolNuevo,
+            String nuevoCargo
+    ) {
+        if (idEmpleadoActor != null && idEmpleadoActor.equals(idEmpleado)) {
+            return false;
+        }
+
+        boolean actorEsRrhh = "RRHH".equals(normalizarRol(rolActor));
+        boolean empleadoEsRrhh = "RRHH".equals(normalizarRol(rolAnterior));
+        boolean cambiaRol = !normalizarRol(rolAnterior).equals(normalizarRol(rolNuevo));
+        boolean cambiaCargo = nuevoCargo != null && !nuevoCargo.isBlank();
+
+        return actorEsRrhh && empleadoEsRrhh && (cambiaRol || cambiaCargo);
+    }
+
+    private String normalizarRol(String rol) {
+        if (rol == null) {
+            return "";
+        }
+        String normalizado = rol.trim().toUpperCase();
+        return normalizado.startsWith("ROLE_") ? normalizado.substring(5) : normalizado;
+    }
+
+    private EmpleadoResponseDTO respuestaRechazada(Empleado empleado, String mensaje) {
+        return new EmpleadoResponseDTO(
+                false,
+                mensaje,
+                empleado.getIdEmpleado(),
+                empleado.getNombres() + " " + empleado.getApellidos(),
+                null,
+                null,
+                null,
+                null,
+                null,
                 empleado.getEstado()
         );
     }

@@ -1,22 +1,23 @@
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
-import { useEffect, useState, useRef, useCallback } from "react";
-import { getUser, clearSession, enable2FA, verify2FA, saveSession, getMe } from "./services/api";
-import Login from "./pages/Login";
+import { useEffect, useState, useRef, useCallback, lazy, Suspense } from "react";
+import { getUser, clearSession, saveSession, getMe, logout } from "./services/api";
 import Acceso403 from "./pages/Acceso403";
-import DashboardRRHH from "./pages/DashboardRRHH";
-import DashboardEmpleado from "./pages/DashboardEmpleado";
-import DashboardGerencia from "./pages/DashboardGerencia";
-import GestionEmpleados from "./pages/GestionEmpleados";
-import ControlAsistencia from "./pages/ControlAsistencia";
-import CalculoNomina from "./pages/CalculoNomina";
-import SolicitudPermisos from "./pages/SolicitudPermisos";
-import GenerarReportes from "./pages/GenerarReportes";
-import NominaEmpleado from "./pages/NominaEmpleado";
-import GerenciaJustificaciones from "./pages/GerenciaJustificaciones";
-import ResetPassword from "./pages/ResetPassword";
-import GestionHorarios from "./pages/GestionHorarios";
-import DevLogin from "./pages/DevLogin"; // ELIMINAR ANTES DE PRODUCCIÓN
 import ErrorBoundary from "./components/ErrorBoundary";
+
+const Login                = lazy(() => import("./pages/Login"));
+const DashboardRRHH        = lazy(() => import("./pages/DashboardRRHH"));
+const DashboardEmpleado    = lazy(() => import("./pages/DashboardEmpleado"));
+const DashboardGerencia    = lazy(() => import("./pages/DashboardGerencia"));
+const GestionEmpleados     = lazy(() => import("./pages/GestionEmpleados"));
+const ControlAsistencia    = lazy(() => import("./pages/ControlAsistencia"));
+const CalculoNomina        = lazy(() => import("./pages/CalculoNomina"));
+const SolicitudPermisos    = lazy(() => import("./pages/SolicitudPermisos"));
+const GenerarReportes      = lazy(() => import("./pages/GenerarReportes"));
+const NominaEmpleado       = lazy(() => import("./pages/NominaEmpleado"));
+const GerenciaJustificaciones = lazy(() => import("./pages/GerenciaJustificaciones"));
+const ResetPassword        = lazy(() => import("./pages/ResetPassword"));
+const GestionHorarios      = lazy(() => import("./pages/GestionHorarios"));
+const DevLogin             = lazy(() => import("./pages/DevLogin")); // ELIMINAR ANTES DE PRODUCCIÓN
 
 const DASH = { RRHH: '/rrhh', EMPLEADO: '/empleado', GERENCIA: '/gerencia' };
 
@@ -57,185 +58,11 @@ function AutoRedirect() {
   );
 }
 
-function Setup2FAModal() {
-  const [visible,   setVisible]   = useState(sessionStorage.getItem('show2FAReminder') === 'true');
-  const [step,      setStep]      = useState(1); // 1=aviso 2=QR 3=verificar 4=éxito
-  const [qrUrl,     setQrUrl]     = useState(null);
-  const [loading,   setLoading]   = useState(false);
-  const [code,      setCode]      = useState('');
-  const [codeError, setCodeError] = useState('');
-  const user = getUser();
-  const location = useLocation();
-
-  // Re-check sessionStorage whenever the route changes (e.g., after login redirect)
-  useEffect(() => {
-    if (sessionStorage.getItem('show2FAReminder') === 'true') {
-      setVisible(true);
-      setStep(1);
-    }
-  }, [location.pathname]);
-
-  const cerrar = () => {
-    sessionStorage.removeItem('show2FAReminder');
-    if (qrUrl) URL.revokeObjectURL(qrUrl);
-    setVisible(false);
-  };
-
-  const handleActivar = async () => {
-    setLoading(true);
-    try {
-      const blob = await enable2FA(user.username);
-      setQrUrl(URL.createObjectURL(blob));
-      setStep(2);
-    } catch { cerrar(); }
-    finally { setLoading(false); }
-  };
-
-  const handleVerificar = async () => {
-    if (code.length < 6) { setCodeError('Ingresa el código de 6 dígitos'); return; }
-    setLoading(true);
-    setCodeError('');
-    try {
-      const data = await verify2FA(user.username, code);
-      if (data.success) {
-        saveSession(data.token, data.rol, user.username, user.idEmpleado ?? null);
-        setStep(4);
-      } else {
-        setCodeError(data.message || 'Código incorrecto, intenta nuevamente');
-        setCode('');
-      }
-    } catch { setCodeError('Error de conexión'); }
-    finally { setLoading(false); }
-  };
-
-  if (!visible || !user?.rol) return null;
-
-  const overlay = {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
-  };
-  const box = {
-    background: '#fff', borderRadius: 16, padding: '36px 32px',
-    maxWidth: 420, width: '90%', textAlign: 'center',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
-    fontFamily: "'Poppins', system-ui, sans-serif",
-  };
-  const btnPrimary = (extra = {}) => ({
-    padding: '10px 22px', borderRadius: 8, border: 'none',
-    background: '#2563eb', color: '#fff', cursor: 'pointer',
-    fontSize: 14, fontWeight: 600, flex: '1 1 0', maxWidth: 170, ...extra,
-  });
-  const btnSecondary = {
-    padding: '10px 22px', borderRadius: 8, border: '1px solid #cbd5e1',
-    background: '#f8fafc', color: '#475569', cursor: 'pointer',
-    fontSize: 14, flex: '1 1 0', maxWidth: 170,
-  };
-  const btns = { display: 'flex', gap: 12, justifyContent: 'center', alignItems: 'center', width: '100%', marginTop: 20 };
-
-  return (
-    <div style={overlay}>
-      <div style={box}>
-
-        {/* ── PASO 1: Aviso ── */}
-        {step === 1 && <>
-          <div style={{ fontSize: 52, marginBottom: 12 }}>🔐</div>
-          <h3 style={{ margin: '0 0 10px', color: '#1e293b', fontSize: 18 }}>
-            Activa la autenticación en dos pasos
-          </h3>
-          <p style={{ color: '#475569', fontSize: 14, margin: '0 0 8px' }}>
-            Tu cuenta aún no tiene la verificación en dos pasos activada.
-            Te recomendamos activarla para proteger tu acceso al sistema.
-          </p>
-          <p style={{ color: '#94a3b8', fontSize: 12, margin: '0 0 4px' }}>
-            Este aviso aparecerá en cada inicio de sesión hasta que la actives.
-          </p>
-          <div style={btns}>
-            <button style={btnSecondary} onClick={cerrar}>Más tarde</button>
-            <button style={btnPrimary()} onClick={handleActivar} disabled={loading}>
-              {loading ? 'Generando QR...' : '🔐 Activar ahora'}
-            </button>
-          </div>
-        </>}
-
-        {/* ── PASO 2: QR ── */}
-        {step === 2 && <>
-          <div style={{ fontSize: 36, marginBottom: 8 }}>📱</div>
-          <h3 style={{ margin: '0 0 10px', color: '#1e293b', fontSize: 18 }}>Escanea el código QR</h3>
-          <p style={{ color: '#475569', fontSize: 13, margin: '0 0 16px' }}>
-            Abre <strong>Google Authenticator</strong> o <strong>Authy</strong> y escanea este código.
-          </p>
-          {qrUrl && (
-            <img src={qrUrl} alt="QR 2FA" style={{
-              width: 200, height: 200, margin: '0 auto 16px', display: 'block',
-              border: '4px solid #e2e8f0', borderRadius: 10,
-            }} />
-          )}
-          <p style={{ color: '#64748b', fontSize: 12, margin: '0 0 4px' }}>
-            Una vez escaneado, haz clic en <strong>Siguiente</strong> para verificar.
-          </p>
-          <div style={btns}>
-            <button style={btnSecondary} onClick={cerrar}>Cancelar</button>
-            <button style={btnPrimary()} onClick={() => setStep(3)}>Siguiente →</button>
-          </div>
-        </>}
-
-        {/* ── PASO 3: Verificar código ── */}
-        {step === 3 && <>
-          <div style={{ fontSize: 42, marginBottom: 10 }}>🔢</div>
-          <h3 style={{ margin: '0 0 10px', color: '#1e293b', fontSize: 18 }}>Verifica el código</h3>
-          <p style={{ color: '#475569', fontSize: 13, margin: '0 0 20px' }}>
-            Ingresa el código de 6 dígitos que aparece en tu aplicación autenticadora para confirmar la configuración.
-          </p>
-          <input
-            type="text"
-            inputMode="numeric"
-            maxLength={6}
-            value={code}
-            onChange={e => { setCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setCodeError(''); }}
-            placeholder="_ _ _ _ _ _"
-            autoFocus
-            style={{
-              width: 220, padding: '14px 20px', textAlign: 'center', fontSize: 26,
-              letterSpacing: 8, border: '2px solid #cbd5e1', borderRadius: 12,
-              outline: 'none', fontWeight: 700, color: '#1e293b',
-              display: 'block', margin: '0 auto', boxSizing: 'border-box',
-              transition: 'border-color 0.2s',
-            }}
-            onFocus={e => e.target.style.borderColor = '#2563eb'}
-            onBlur={e => e.target.style.borderColor = '#cbd5e1'}
-          />
-          {codeError && <p style={{ color: '#ef4444', fontSize: 13, margin: '10px 0 0' }}>{codeError}</p>}
-          <div style={btns}>
-            <button style={btnSecondary} onClick={() => { setStep(2); setCode(''); setCodeError(''); }}>← Atrás</button>
-            <button style={btnPrimary()} onClick={handleVerificar} disabled={loading || code.length < 6}>
-              {loading ? 'Verificando...' : '✅ Verificar'}
-            </button>
-          </div>
-        </>}
-
-        {/* ── PASO 4: Éxito ── */}
-        {step === 4 && <>
-          <div style={{ fontSize: 60, marginBottom: 12 }}>✅</div>
-          <h3 style={{ margin: '0 0 10px', color: '#16a34a', fontSize: 20 }}>
-            ¡2FA activado correctamente!
-          </h3>
-          <p style={{ color: '#475569', fontSize: 14, margin: '0 0 24px' }}>
-            A partir del próximo inicio de sesión se te pedirá el código de tu aplicación autenticadora.
-          </p>
-          <button style={btnPrimary({ maxWidth: 200, margin: '0 auto', display: 'block' })} onClick={cerrar}>
-            Continuar al sistema
-          </button>
-        </>}
-
-      </div>
-    </div>
-  );
-}
-
 function ProtectedRoute({ children, requiredRole }) {
   const user = getUser();
   if (!user?.rol) return <Navigate to="/" replace />;
-  if (requiredRole && user.rol !== requiredRole) return <Acceso403 />;
+  const normalizeRole = (rol) => String(rol || '').replace(/^ROLE_/i, '').toUpperCase();
+  if (requiredRole && normalizeRole(user.rol) !== normalizeRole(requiredRole)) return <Acceso403 />;
   return children;
 }
 
@@ -327,8 +154,11 @@ function AfkModal({ countdown, onContinuar, onSalir }) {
 
 function App() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const sessionActive = Boolean(getUser()?.rol) && !['/', '/reset-password', '/dev'].includes(location.pathname);
   const [showAfkModal, setShowAfkModal]   = useState(false);
   const [afkCountdown, setAfkCountdown]   = useState(COUNTDOWN_S);
+  const [apiError, setApiError] = useState(null);
   const warningTimerRef      = useRef(null);
   const logoutTimerRef       = useRef(null);
   const countdownIntervalRef = useRef(null);
@@ -336,6 +166,20 @@ function App() {
   const showAfkModalRef      = useRef(false); // ref para leer en el event handler sin closure stale
 
   useEffect(() => {
+    const handler = (event) => {
+      setApiError(event.detail?.message || 'Ocurrio un error al comunicarse con el servidor.');
+      setTimeout(() => setApiError(null), 6500);
+    };
+    window.addEventListener('api-error', handler);
+    return () => window.removeEventListener('api-error', handler);
+  }, []);
+
+  useEffect(() => {
+    // Si hay un primer acceso pendiente y NO estamos en reset-password, volver al login
+    if (sessionStorage.getItem('primerAccesoPendiente') && !location.pathname.startsWith('/reset-password')) {
+      navigate('/', { replace: true });
+      return;
+    }
     const user = getUser();
     if (!user?.rol) {
       getMe()
@@ -345,14 +189,15 @@ function App() {
         })
         .catch(() => {});
     }
-  }, [navigate]);
+  }, [navigate, location.pathname]);
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
     clearTimeout(warningTimerRef.current);
     clearTimeout(logoutTimerRef.current);
     clearInterval(countdownIntervalRef.current);
     showAfkModalRef.current = false;
     setShowAfkModal(false);
+    try { await logout(); } catch {}
     clearSession();
     navigate('/', { replace: true });
   }, [navigate]);
@@ -385,11 +230,33 @@ function App() {
     logoutTimerRef.current = setTimeout(handleLogout, LOGOUT_MS);
   }, [handleLogout]);
 
+  const handleContinuar = useCallback(async () => {
+    // Cancelar de inmediato el cierre forzado (15 min) para que no dispare
+    // mientras se espera la verificación de sesión con el servidor.
+    clearTimeout(warningTimerRef.current);
+    clearTimeout(logoutTimerRef.current);
+    clearInterval(countdownIntervalRef.current);
+    try {
+      await getMe();
+      resetAfk();
+    } catch {
+      handleLogout();
+    }
+  }, [resetAfk, handleLogout]);
+
   // Guardar referencia actualizada para el event handler
   useEffect(() => { resetAfkRef.current = resetAfk; }, [resetAfk]);
 
   useEffect(() => {
     const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    if (!sessionActive) {
+      clearTimeout(warningTimerRef.current);
+      clearTimeout(logoutTimerRef.current);
+      clearInterval(countdownIntervalRef.current);
+      showAfkModalRef.current = false;
+      return;
+    }
+
     // Usa el ref para evitar el closure stale de showAfkModal
     const handler = () => {
       if (!showAfkModalRef.current) resetAfkRef.current?.();
@@ -402,18 +269,38 @@ function App() {
       clearInterval(countdownIntervalRef.current);
       events.forEach(e => window.removeEventListener(e, handler));
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionActive]);
 
   return (
     <ErrorBoundary>
-    <Setup2FAModal />
-    {showAfkModal && (
+    {apiError && (
+      <div style={{
+        position: 'fixed',
+        top: 16,
+        right: 16,
+        zIndex: 10000,
+        maxWidth: 420,
+        background: '#7f1d1d',
+        color: '#fff',
+        border: '1px solid #fca5a5',
+        borderRadius: 10,
+        padding: '12px 16px',
+        boxShadow: '0 16px 40px rgba(0,0,0,0.22)',
+        fontFamily: "'Poppins', system-ui, sans-serif",
+        fontSize: 13,
+        lineHeight: 1.45,
+      }}>
+        {apiError}
+      </div>
+    )}
+    {sessionActive && showAfkModal && (
       <AfkModal
         countdown={afkCountdown}
-        onContinuar={resetAfk}
+        onContinuar={handleContinuar}
         onSalir={handleLogout}
       />
     )}
+    <Suspense fallback={<div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", fontFamily: "system-ui", color: "#64748b" }}>Cargando...</div>}>
     <Routes>
       {/* Auth (rutas públicas) */}
       <Route path="/" element={<Login />} />
@@ -432,7 +319,8 @@ function App() {
       <Route path="/empleado" element={<ProtectedRoute requiredRole="EMPLEADO"><DashboardEmpleado /></ProtectedRoute>} />
       <Route path="/empleado/asistencia" element={<ProtectedRoute requiredRole="EMPLEADO"><ControlAsistencia /></ProtectedRoute>} />
       <Route path="/empleado/solicitudes" element={<ProtectedRoute requiredRole="EMPLEADO"><SolicitudPermisos /></ProtectedRoute>} />
-      <Route path="/empleado/nomina" element={<ProtectedRoute requiredRole="EMPLEADO"><NominaEmpleado /></ProtectedRoute>} />
+      <Route path="/empleado/nomina"   element={<ProtectedRoute requiredRole="EMPLEADO"><NominaEmpleado /></ProtectedRoute>} />
+
 
       {/* Gerencia */}
       <Route path="/gerencia" element={<ProtectedRoute requiredRole="GERENCIA"><DashboardGerencia /></ProtectedRoute>} />
@@ -440,12 +328,13 @@ function App() {
       <Route path="/gerencia/asistencia" element={<ProtectedRoute requiredRole="GERENCIA"><ControlAsistencia /></ProtectedRoute>} />
       <Route path="/gerencia/justificaciones" element={<ProtectedRoute requiredRole="GERENCIA"><GerenciaJustificaciones /></ProtectedRoute>} />
 
-      {/* DEV — ELIMINAR ANTES DE PRODUCCIÓN */}
-      <Route path="/dev" element={<DevLogin />} />
+      {/* DEV — solo disponible en desarrollo */}
+      {import.meta.env.DEV && <Route path="/dev" element={<DevLogin />} />}
 
       {/* Catch-all: URL inexistente → autocorrector */}
       <Route path="*" element={<AutoRedirect />} />
     </Routes>
+    </Suspense>
     </ErrorBoundary>
   );
 }

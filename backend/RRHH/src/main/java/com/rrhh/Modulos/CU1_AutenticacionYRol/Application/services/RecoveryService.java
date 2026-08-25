@@ -11,6 +11,8 @@ import com.rrhh.Modulos.CU1_AutenticacionYRol.Infrastructure.services.EmailServi
 import com.rrhh.Shared.persistence.PasswordResetTokenModel;
 import com.rrhh.Shared.persistence.UsuarioModel;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,8 @@ import java.util.UUID;
 
 @Service
 public class RecoveryService {
+
+    private static final Logger log = LoggerFactory.getLogger(RecoveryService.class);
 
     private final JpaUsuarioRepository usuarioRepository;
     private final JpaPasswordResetTokenRepository tokenRepository;
@@ -69,6 +73,10 @@ public class RecoveryService {
                 ? usuario.getEmpleado().getCorreo()
                 : usuario.getCorreoInst();
 
+        String nombreEmpleado = usuario.getEmpleado() != null
+                ? (usuario.getEmpleado().getNombres() + " " + usuario.getEmpleado().getApellidos()).trim()
+                : "";
+
         String token = UUID.randomUUID().toString();
 
         PasswordResetTokenModel resetToken = new PasswordResetTokenModel();
@@ -82,9 +90,9 @@ public class RecoveryService {
 
         // El envío de correo va en try-catch: si falla no se revierte el token guardado
         try {
-            emailService.enviarCorreoRecuperacion(correoPersonal, link);
+            emailService.enviarCorreoRecuperacion(correoPersonal, nombreEmpleado, link);
         } catch (Exception e) {
-            // El token quedó guardado; el usuario puede reintentar o contactar soporte
+            log.error("[EMAIL] Fallo al enviar correo de recuperacion a {}: {}", correoPersonal, e.getMessage(), e);
         }
 
         return new RecoveryResponseDTO(

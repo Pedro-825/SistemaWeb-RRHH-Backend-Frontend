@@ -58,8 +58,8 @@ export default function TwoFA({ open, username, onClose, onSuccess }) {
     try {
       const data = await verify2FA(username, finalCode);
       if (data.success) {
-        saveSession(data.token, data.rol, username, data.idEmpleado ?? null, data.requiereCambioPassword ?? false);
-        onSuccess(data.rol, data.idEmpleado ?? null, data.requiereCambioPassword ?? false);
+        saveSession(data.token, data.rol, data.nombreUsuario || username, data.idEmpleado ?? null, data.requiereCambioPassword ?? false);
+        onSuccess(data.rol, data.idEmpleado ?? null, data.requiereCambioPassword ?? false, data.appMovilInstalada ?? false);
         onClose();
       } else {
         const nuevosIntentos = intentos - 1;

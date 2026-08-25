@@ -22,4 +22,6 @@ public interface ISolicitudService {
     SolicitudResponseDTO buscarPorId(Integer idSolicitud);
 
     SolicitudResponseDTO clonarSolicitud(Integer idSolicitud, Long idEmpleado);
+
+    int obtenerSaldoVacaciones(Long idUsuario);
 }

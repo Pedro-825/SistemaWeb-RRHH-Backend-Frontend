@@ -15,6 +15,7 @@ import com.rrhh.Modulos.CU1_AutenticacionYRol.Application.services.RecoveryServi
 import com.rrhh.Modulos.CU1_AutenticacionYRol.Presentation.routes.ApiRoutes;
 
 import com.rrhh.config.security.AuthenticatedUser;
+import com.rrhh.config.security.JwtConfig;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -39,9 +40,12 @@ public class AuthController {
 
     private final RecoveryService recoveryService;
 
-    public AuthController(IAuthService authService, RecoveryService recoveryService) {
+    private final JwtConfig jwtConfig;
+
+    public AuthController(IAuthService authService, RecoveryService recoveryService, JwtConfig jwtConfig) {
         this.authService = authService;
         this.recoveryService = recoveryService;
+        this.jwtConfig = jwtConfig;
     }
 
     @PostMapping(ApiRoutes.LOGIN)
@@ -63,13 +67,7 @@ public class AuthController {
         }
 
         if (response.getToken() != null) {
-            ResponseCookie jwtCookie = ResponseCookie.from("jwt", response.getToken())
-                    .httpOnly(true)
-                    .secure(false)
-                    .sameSite("Lax")
-                    .path("/")
-                    .maxAge(authService.getJwtExpirationSeconds())
-                    .build();
+            ResponseCookie jwtCookie = jwtConfig.crearCookieJwt(response.getToken());
             httpResponse.addHeader(HttpHeaders.SET_COOKIE, jwtCookie.toString());
         }
 
@@ -92,13 +90,7 @@ public class AuthController {
         }
 
         if (response.getToken() != null) {
-            ResponseCookie jwtCookie = ResponseCookie.from("jwt", response.getToken())
-                    .httpOnly(true)
-                    .secure(false)
-                    .sameSite("Lax")
-                    .path("/")
-                    .maxAge(authService.getJwtExpirationSeconds())
-                    .build();
+            ResponseCookie jwtCookie = jwtConfig.crearCookieJwt(response.getToken());
             httpResponse.addHeader(HttpHeaders.SET_COOKIE, jwtCookie.toString());
         }
 
@@ -187,19 +179,13 @@ public class AuthController {
         return ResponseEntity.ok(new MeResponseDTO(
                 authUser.getUsername(),
                 authUser.getRol(),
-                null
+                authUser.getIdEmpleado()
         ));
     }
 
     @PostMapping(ApiRoutes.LOGOUT)
     public ResponseEntity<Void> logout(HttpServletResponse httpResponse) {
-        ResponseCookie clearCookie = ResponseCookie.from("jwt", "")
-                .httpOnly(true)
-                .secure(false)
-                .sameSite("Lax")
-                .path("/")
-                .maxAge(0)
-                .build();
+        ResponseCookie clearCookie = jwtConfig.crearCookieJwtVacia();
         httpResponse.addHeader(HttpHeaders.SET_COOKIE, clearCookie.toString());
         return ResponseEntity.ok().build();
     }

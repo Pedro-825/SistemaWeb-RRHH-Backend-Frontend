@@ -4,7 +4,25 @@ import "../styles/Login.css";
 import logo from "../assets/logo.png";
 import TwoFA from "./TwoFA";
 import PrimerAccesoModal from "./PrimerAccesoModal";
+import Setup2FAReminderModal from "./Setup2FAReminderModal";
+import DownloadAppModal from "../components/DownloadAppModal";
 import { login, saveSession, getUser, solicitarRecuperacion } from "../services/api";
+
+function UserIcon() {
+  return (
+    <svg className="login-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5Z" />
+    </svg>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg className="login-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm-7-2a2 2 0 0 1 4 0v2h-4V7Z" />
+    </svg>
+  );
+}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -15,36 +33,69 @@ export default function Login() {
   const [intentos, setIntentos]     = useState(null);
   const [show2FA,        setShow2FA]        = useState(false);
   const [resetKey,       setResetKey]       = useState(0);
-  const [primerAcceso,   setPrimerAcceso]   = useState(false);
-  const [primerUsername, setPrimerUsername] = useState("");
+  const [primerAcceso,       setPrimerAcceso]       = useState(false);
+  const [primerUsername,     setPrimerUsername]     = useState("");
+  const [dosFaYaConfigurado, setDosFaYaConfigurado] = useState(false);
   const [showForgot,    setShowForgot]   = useState(false);
   const [forgotInput,   setForgotInput]  = useState("");
   const [forgotOk,      setForgotOk]    = useState(false);
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotError,   setForgotError]  = useState("");
+  const [showDownloadModal, setShowDownloadModal] = useState(false);
+  const [pendingRol,        setPendingRol]        = useState(null);
+  const [show2FASetup,      setShow2FASetup]      = useState(false);
+  const [pendingRedirect,   setPendingRedirect]   = useState(null);
+
 
   useEffect(() => {
+    const lastApiError = sessionStorage.getItem('lastApiError');
+    if (lastApiError) {
+      setMensaje(lastApiError);
+      sessionStorage.removeItem('lastApiError');
+    }
+    // Si hay un primer acceso pendiente por recarga de pagina, restaurar el modal
+    const pendingUser = sessionStorage.getItem('primerAccesoPendiente');
+    if (pendingUser) {
+      const dfa = sessionStorage.getItem('primerAccesoDosFa') === 'true';
+      setPrimerUsername(pendingUser);
+      setDosFaYaConfigurado(dfa);
+      setPrimerAcceso(true);
+      return;
+    }
     const user = getUser();
     if (user?.rol) redirectByRole(user.rol);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const redirectByRole = (role) => {
+  function redirectByRole(role) {
     if      (role === "GERENCIA") navigate("/gerencia", { replace: true });
     else if (role === "RRHH")     navigate("/rrhh", { replace: true });
     else if (role === "EMPLEADO") navigate("/empleado", { replace: true });
     else setMensaje("Rol de usuario no reconocido.");
+  }
+
+  const USUARIOS_PRUEBA = ['admin.rrhh', 'empleado_test', 'gerencia_test'];
+
+  const redirigirConModal = (rol, idEmpleado, appInstalada = false) => {
+    const recordatorioOculto = localStorage.getItem(`downloadAppDismissed:${idEmpleado}`) === "true";
+    if ((rol === "EMPLEADO" || rol === "GERENCIA") && idEmpleado && !appInstalada && !recordatorioOculto && !USUARIOS_PRUEBA.includes(username)) {
+      setPendingRol(rol);
+      setShowDownloadModal(true);
+    } else {
+      redirectByRole(rol);
+    }
   };
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setMensaje("");
     setIntentos(null);
+    sessionStorage.removeItem("lastApiError");
     try {
       const data = await login(username, password);
       if (!data.success) {
         const rem = data.intentosRestantes ?? data.remainingAttempts ?? null;
         setIntentos(rem);
-        setMensaje(data.message || "Credenciales inválidas. Intente nuevamente.");
+        setMensaje(data.message || "Credenciales invalidas. Intente nuevamente.");
         return;
       }
       if (data.requires2FA) {
@@ -52,16 +103,25 @@ export default function Login() {
         setShow2FA(true);
         return;
       }
-      saveSession(data.token, data.rol, username, data.idEmpleado ?? null, data.requiereCambioPassword ?? false);
-      if (data.requires2FASetup) sessionStorage.setItem('show2FAReminder', 'true');
+      const nombreUsuarioReal = data.nombreUsuario || username;
+      saveSession(data.token, data.rol, nombreUsuarioReal, data.idEmpleado ?? null, data.requiereCambioPassword ?? false);
       if (data.requiereCambioPassword) {
-        setPrimerUsername(username);
+        const dfa = data.dosFaYaConfigurado ?? false;
+        sessionStorage.setItem('primerAccesoPendiente', nombreUsuarioReal);
+        sessionStorage.setItem('primerAccesoDosFa', dfa ? 'true' : 'false');
+        setPrimerUsername(nombreUsuarioReal);
+        setDosFaYaConfigurado(dfa);
         setPrimerAcceso(true);
         return;
       }
-      redirectByRole(data.rol);
-    } catch {
-      setMensaje("Error de conexión con el servidor. Verifique que el servicio esté disponible.");
+      if (data.requires2FASetup) {
+        setPendingRedirect({ rol: data.rol, idEmpleado: data.idEmpleado ?? null, appInstalada: data.appMovilInstalada ?? false });
+        setShow2FASetup(true);
+        return;
+      }
+      redirigirConModal(data.rol, data.idEmpleado ?? null, data.appMovilInstalada ?? false);
+    } catch (err) {
+      setMensaje(err?.message || "No se pudo conectar con el servidor. Verifique que el servicio este disponible.");
     }
   };
 
@@ -84,8 +144,8 @@ export default function Login() {
       } else {
         setForgotError(data.message || "No se pudo procesar la solicitud.");
       }
-    } catch {
-      setForgotError("Error de conexión con el servidor.");
+    } catch (err) {
+      setForgotError(err?.message || "No se pudo conectar con el servidor.");
     } finally {
       setForgotLoading(false);
     }
@@ -95,29 +155,29 @@ export default function Login() {
     <div className="login-page">
       <div className="login-card">
 
-        {/* ── PANEL IZQUIERDO ── */}
+        {/* PANEL IZQUIERDO */}
         <div className="login-left">
           <img src={logo} className="logo-img" alt="Hospital San Gabriel" />
-          <p className="login-tagline">Sistema de Recursos Humanos – Hospital</p>
-          <p className="login-sys-label">Sistema de Recursos Humanos – Hospital</p>
+          <p className="login-tagline">Sistema de Recursos Humanos - Hospital</p>
+          <p className="login-sys-label">Sistema de Recursos Humanos - Hospital</p>
         </div>
 
-        {/* ── PANEL DERECHO ── */}
+        {/* PANEL DERECHO */}
         <div className="login-right">
-          <div className="login-avatar">👤</div>
-          <h2>Iniciar Sesión</h2>
+          <div className="login-avatar"><UserIcon /></div>
+          <h2>Iniciar Sesion</h2>
           <p className="login-subtitle">Ingrese sus credenciales para acceder al sistema</p>
 
           <form className="login-form" onSubmit={handleLogin}>
             <div className="login-field">
               <label>Usuario o email</label>
               <div className="lf-wrap">
-                <span className="lf-prefix">👤</span>
+                <span className="lf-prefix"><UserIcon /></span>
                 <input
                   type="text"
                   placeholder="Ingrese su usuario o email"
                   value={username}
-                  onChange={e => setUsername(e.target.value)}
+                  onChange={e => { setUsername(e.target.value); setMensaje(""); }}
                   autoComplete="username"
                   required
                 />
@@ -125,41 +185,41 @@ export default function Login() {
             </div>
 
             <div className="login-field">
-              <label>Contraseña</label>
+              <label>Contrasena</label>
               <div className="lf-wrap">
-                <span className="lf-prefix">🔒</span>
+                <span className="lf-prefix"><LockIcon /></span>
                 <input
                   type={showPwd ? "text" : "password"}
-                  placeholder="Ingrese su contraseña"
+                  placeholder="Ingrese su contrasena"
                   value={password}
-                  onChange={e => setPassword(e.target.value)}
+                  onChange={e => { setPassword(e.target.value); setMensaje(""); }}
                   autoComplete="current-password"
                   required
                 />
                 <button type="button" className="lf-eye" onClick={() => setShowPwd(v => !v)} tabIndex={-1}>
-                  {showPwd ? "🙈" : "👁"}
+                  {showPwd ? "Ocultar" : "Ver"}
                 </button>
               </div>
             </div>
 
-            <button type="submit" className="login-btn">🔒 Iniciar Sesión</button>
+            <button type="submit" className="login-btn">Iniciar Sesion</button>
           </form>
 
           <p className="login-forgot">
             <button type="button" className="login-forgot-btn" onClick={() => setShowForgot(true)}>
-              ¿Olvidó su contraseña?
+              Olvido su contrasena?
             </button>
           </p>
 
           {show2FA && (
             <div className="login-info-alert">
-              ℹ️ Se requiere un código de verificación de dos pasos para acceder a su cuenta.
+              Se requiere un codigo de verificacion de dos pasos para acceder a su cuenta.
             </div>
           )}
 
           {mensaje && (
             <div className="login-error">
-              <div>⚠️ {mensaje}</div>
+              <div>{mensaje}</div>
               {intentos !== null && (
                 <div className="login-attempts">Intentos restantes: <strong>{intentos}</strong></div>
               )}
@@ -169,21 +229,23 @@ export default function Login() {
         </div>
       </div>
 
-      {/* ── 2FA POPUP ── */}
+      {/* 2FA POPUP */}
       {show2FA && (
         <TwoFA
           key={resetKey}
           open={show2FA}
           username={username}
           onClose={() => setShow2FA(false)}
-          onSuccess={(rol, idEmpleado, requiereCambioPassword) => {
+          onSuccess={(rol, idEmpleado, requiereCambioPassword, appMovilInstalada) => {
             setShow2FA(false);
+            const nombreUsuarioReal = getUser()?.username || username;
             if (requiereCambioPassword) {
-              setPrimerUsername(username);
+              saveSession(null, rol, nombreUsuarioReal, idEmpleado, true);
+              setPrimerUsername(nombreUsuarioReal);
               setPrimerAcceso(true);
               return;
             }
-            redirectByRole(rol);
+            redirigirConModal(rol, idEmpleado, appMovilInstalada);
           }}
         />
       )}
@@ -191,21 +253,53 @@ export default function Login() {
       {primerAcceso && (
         <PrimerAccesoModal
           username={primerUsername}
-          onDone={(rol) => {
+          dosFaYaConfigurado={dosFaYaConfigurado}
+          onDone={(rol, usernameModal, idEmpleadoModal) => {
+            sessionStorage.removeItem('primerAccesoPendiente');
+            sessionStorage.removeItem('primerAccesoDosFa');
             setPrimerAcceso(false);
-            redirectByRole(rol);
+            setDosFaYaConfigurado(false);
+            if (usernameModal) setUsername(usernameModal);
+            redirigirConModal(rol, idEmpleadoModal ?? getUser().idEmpleado);
           }}
         />
       )}
 
-      {/* ── MODAL RECUPERAR CONTRASEÑA ── */}
+      {show2FASetup && (
+        <Setup2FAReminderModal
+          username={getUser()?.username}
+          onDone={() => {
+            setShow2FASetup(false);
+            if (pendingRedirect) {
+              redirigirConModal(pendingRedirect.rol, pendingRedirect.idEmpleado, pendingRedirect.appInstalada);
+              setPendingRedirect(null);
+            }
+          }}
+        />
+      )}
+
+      {showDownloadModal && (
+        <DownloadAppModal
+          idEmpleado={getUser().idEmpleado}
+          onClose={() => {
+            setShowDownloadModal(false);
+            redirectByRole(pendingRol);
+          }}
+          onInstalada={() => {
+            setShowDownloadModal(false);
+            redirectByRole(pendingRol);
+          }}
+        />
+      )}
+
+      {/* MODAL RECUPERAR CONTRASENA */}
       {showForgot && (
-        <div className="login-modal-overlay" onClick={e => e.target === e.currentTarget && cerrarForgot()}>
+        <div className="login-modal-overlay">
           <div className="login-modal-box">
-            <h3>🔑 Recuperar Contraseña</h3>
+            <h3>Recuperar contrasena</h3>
             {!forgotOk ? (
               <>
-                <p>Ingrese su usuario o correo electrónico registrado. Le enviaremos las instrucciones de recuperación.</p>
+                <p>Ingrese su usuario o correo electronico registrado. Le enviaremos las instrucciones de recuperacion.</p>
                 <form onSubmit={handleForgotSubmit}>
                   <div className="login-field">
                     <label>Usuario o correo</label>
@@ -219,7 +313,7 @@ export default function Login() {
                     />
                   </div>
                   {forgotError && (
-                    <div className="login-error" style={{ margin: "8px 0 0" }}>⚠️ {forgotError}</div>
+                    <div className="login-error" style={{ margin: "8px 0 0" }}>{forgotError}</div>
                   )}
                   <div className="login-modal-actions">
                     <button type="button" className="login-modal-btn-secondary" onClick={cerrarForgot} disabled={forgotLoading}>Cancelar</button>
@@ -232,7 +326,7 @@ export default function Login() {
             ) : (
               <>
                 <div className="login-modal-success">
-                  ✅ Si su usuario o correo está registrado en el sistema, recibirá las instrucciones en su correo institucional.
+                  Si su usuario o correo esta registrado en el sistema, recibira las instrucciones en su correo institucional.
                 </div>
                 <div className="login-modal-actions">
                   <button className="login-btn" style={{ margin: 0 }} onClick={cerrarForgot}>Cerrar</button>

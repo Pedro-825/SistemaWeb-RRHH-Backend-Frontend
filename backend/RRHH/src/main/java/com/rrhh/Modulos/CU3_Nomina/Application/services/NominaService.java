@@ -12,6 +12,7 @@ import com.rrhh.Modulos.CU3_Nomina.Domain.repository.INominaRepository;
 import com.rrhh.Modulos.CU1_AutenticacionYRol.Domain.entities.Historial;
 import com.rrhh.Modulos.CU1_AutenticacionYRol.Domain.repository.IHistorialRepository;
 import com.rrhh.Shared.persistence.ContratoModel;
+import com.rrhh.Shared.persistence.EmpleadoDerechoHabientesModel;
 import com.rrhh.Shared.persistence.EmpleadoModel;
 import com.rrhh.Shared.config.RRHHProperties;
 import com.rrhh.Shared.persistence.FamiliaInfoModel;
@@ -23,6 +24,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +40,13 @@ public class NominaService implements INominaService {
     private static final int MINUTOS_EN_HORA = 60;
     private static final int HORAS_JORNADA_DIARIA = 8;
 
+    // Departamentos con bonificación de guardia y riesgo
+    private static final java.util.Set<String> DPTOS_CLINICOS = java.util.Set.of(
+        "Emergencia", "Medicina", "Enfermería", "Enfermeria",
+        "Radiología", "Radiologia", "Laboratorio"
+    );
+
+
     private final INominaRepository nominaRepository;
     private final IDetalleNominaRepository detalleNominaRepository;
     private final IHistorialRepository historialRepository;
@@ -48,6 +57,7 @@ public class NominaService implements INominaService {
     private final com.rrhh.Modulos.CU3_Nomina.Infrastructure.interfaces.JpaRegistroAsistenciaRepository jpaRegistroAsistenciaRepository;
     private final com.rrhh.Modulos.CU2_GestionEmpleados.Infrastructure.interfaces.JpaContratoRepository jpaContratoRepository;
     private final com.rrhh.Modulos.CU3_Nomina.Infrastructure.interfaces.JpaFamiliaInfoRepository jpaFamiliaInfoRepository;
+    private final com.rrhh.Modulos.CU2_GestionEmpleados.Infrastructure.interfaces.JpaEmpleadoDerechoHabientesRepository jpaEmpleadoDerechoHabientesRepository;
 
     public NominaService(
             RRHHProperties rrhhProperties,
@@ -59,7 +69,8 @@ public class NominaService implements INominaService {
             com.rrhh.Modulos.CU2_GestionEmpleados.Infrastructure.interfaces.JpaEmpleadoRepository jpaEmpleadoRepository,
             com.rrhh.Modulos.CU3_Nomina.Infrastructure.interfaces.JpaRegistroAsistenciaRepository jpaRegistroAsistenciaRepository,
             com.rrhh.Modulos.CU2_GestionEmpleados.Infrastructure.interfaces.JpaContratoRepository jpaContratoRepository,
-            com.rrhh.Modulos.CU3_Nomina.Infrastructure.interfaces.JpaFamiliaInfoRepository jpaFamiliaInfoRepository) {
+            com.rrhh.Modulos.CU3_Nomina.Infrastructure.interfaces.JpaFamiliaInfoRepository jpaFamiliaInfoRepository,
+            com.rrhh.Modulos.CU2_GestionEmpleados.Infrastructure.interfaces.JpaEmpleadoDerechoHabientesRepository jpaEmpleadoDerechoHabientesRepository) {
         this.rrhhProperties = rrhhProperties;
         this.nominaRepository = nominaRepository;
         this.detalleNominaRepository = detalleNominaRepository;
@@ -70,6 +81,7 @@ public class NominaService implements INominaService {
         this.jpaRegistroAsistenciaRepository = jpaRegistroAsistenciaRepository;
         this.jpaContratoRepository = jpaContratoRepository;
         this.jpaFamiliaInfoRepository = jpaFamiliaInfoRepository;
+        this.jpaEmpleadoDerechoHabientesRepository = jpaEmpleadoDerechoHabientesRepository;
     }
 
     @Override
@@ -78,6 +90,15 @@ public class NominaService implements INominaService {
 
         if (request.getFechaInicio().isAfter(request.getFechaFin())) {
             throw new IllegalArgumentException("La fecha de inicio no puede ser mayor a la fecha fin.");
+        }
+
+        // No se pueden calcular meses futuros
+        YearMonth mesActual = YearMonth.now();
+        if (YearMonth.from(request.getFechaInicio()).isAfter(mesActual)
+                || YearMonth.from(request.getFechaFin()).isAfter(mesActual)) {
+            throw new IllegalArgumentException(
+                "No se puede calcular la nómina de meses futuros."
+            );
         }
 
         List<EmpleadoModel> empleados = obtenerEmpleadosActivos(request);
@@ -90,31 +111,63 @@ public class NominaService implements INominaService {
         }
 
         String periodo = generarPeriodo(request.getFechaInicio(), request.getFechaFin());
+
+        List<Long> idsEmpleados = empleados.stream()
+            .map(EmpleadoModel::getIdEmpleado)
+            .collect(Collectors.toList());
+
+        // Pre-cargar TODO en 3 queries antes del bucle (evita N+1)
+        Map<Long, List<RegistroAsistenciaModel>> asistenciasPorEmpleado =
+            jpaRegistroAsistenciaRepository
+                .findByEmpleadoIdEmpleadoInAndFechaBetween(
+                    idsEmpleados,
+                    request.getFechaInicio(),
+                    request.getFechaFin()
+                )
+                .stream()
+                .collect(Collectors.groupingBy(r -> r.getEmpleado().getIdEmpleado()));
+
+        Map<Long, ContratoModel> contratosPorEmpleado =
+            jpaContratoRepository.findByEmpleadoIdEmpleadoInAndEstado(idsEmpleados, "ACTIVO")
+                .stream()
+                .collect(Collectors.toMap(
+                    c -> c.getEmpleado().getIdEmpleado(),
+                    c -> c,
+                    (c1, c2) -> c1
+                ));
+
+        Map<Long, List<FamiliaInfoModel>> familiaPorEmpleado =
+            jpaFamiliaInfoRepository.findByEmpleadoIdEmpleadoInAndActivoTrue(idsEmpleados)
+                .stream()
+                .collect(Collectors.groupingBy(f -> f.getEmpleado().getIdEmpleado()));
+
+        Map<Long, EmpleadoDerechoHabientesModel> perfilNominaPorEmpleado =
+            jpaEmpleadoDerechoHabientesRepository.findByEmpleadoIdEmpleadoInAndActivoTrue(idsEmpleados)
+                .stream()
+                .collect(Collectors.toMap(
+                    p -> p.getEmpleado().getIdEmpleado(),
+                    p -> p,
+                    (p1, p2) -> p1
+                ));
+
         List<NominaResponseDTO> resultados = new ArrayList<>();
 
         try {
             for (EmpleadoModel empleado : empleados) {
 
-                List<RegistroAsistenciaModel> registros = jpaRegistroAsistenciaRepository
-                    .findByEmpleadoIdEmpleadoAndFechaBetween(
-                        empleado.getIdEmpleado(),
-                        request.getFechaInicio(),
-                        request.getFechaFin()
-                    );
+                List<RegistroAsistenciaModel> registros = filtrarRegistrosValidos(
+                    asistenciasPorEmpleado.getOrDefault(empleado.getIdEmpleado(), List.of())
+                );
+                // Empleados sin registros completos aún (mes en curso) se incluyen con 0 días trabajados
 
-                registros = filtrarRegistrosValidos(registros);
-
-                validarDatosAsistencia(registros, empleado);
-
-                ContratoModel contrato = jpaContratoRepository
-                    .findFirstByEmpleadoIdEmpleadoAndEstado(empleado.getIdEmpleado(), "ACTIVO")
-                    .orElseThrow(() -> new IllegalStateException(
-                        "El empleado " + empleado.getNombres() + " no tiene contrato activo."
-                    ));
+                ContratoModel contrato = contratosPorEmpleado.get(empleado.getIdEmpleado());
+                if (contrato == null) continue; // sin contrato activo → se excluye de nómina
                 BigDecimal sueldoBase = contrato.getSueldo();
-                String tipoPension = (contrato.getTipoPension() != null &&
-                    (contrato.getTipoPension().equals("ONP") || contrato.getTipoPension().equals("AFP")))
-                    ? contrato.getTipoPension() : "ONP";
+                EmpleadoDerechoHabientesModel perfilNomina = perfilNominaPorEmpleado.get(empleado.getIdEmpleado());
+                String tipoPension = resolverTipoPension(
+                    perfilNomina != null ? perfilNomina.getRegimenPension() : null,
+                    contrato.getTipoPension()
+                );
 
                 validarDatosContrato(sueldoBase, empleado);
 
@@ -149,18 +202,53 @@ public class NominaService implements INominaService {
                     .multiply(BigDecimal.valueOf(totalMinutosTardanza))
                     .setScale(2, RoundingMode.HALF_UP);
 
-                int cantidadHijos = contarHijos(empleado.getIdEmpleado());
-                BigDecimal bonifFamiliar = sueldoBase.multiply(rrhhProperties.getBonifFamiliar())
-                    .multiply(BigDecimal.valueOf(cantidadHijos))
-                    .setScale(2, RoundingMode.HALF_UP);
+                int cantidadHijos = contarHijosDesdeCache(
+                    familiaPorEmpleado.getOrDefault(empleado.getIdEmpleado(), List.of())
+                );
+                // La asignación familiar se otorga una sola vez si existe un hijo elegible.
+                BigDecimal bonifFamiliar = cantidadHijos > 0
+                    ? rrhhProperties.getRmv().multiply(rrhhProperties.getBonifFamiliar())
+                        .setScale(2, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
                 int diasTrabajados = (int) registros.stream()
                     .filter(r -> r.getHoraEntrada() != null && r.getHoraSalida() != null)
                     .count();
-                BigDecimal bonifTurnoNocturno = sueldoBase.multiply(rrhhProperties.getBonifNocturno()).setScale(2, RoundingMode.HALF_UP);
-                BigDecimal bonifGuardia = rrhhProperties.getBonifGuardia().multiply(BigDecimal.valueOf(diasTrabajados)).setScale(2, RoundingMode.HALF_UP);
-                BigDecimal bonifRiesgo = sueldoBase.multiply(rrhhProperties.getBonifRiesgo()).setScale(2, RoundingMode.HALF_UP);
-                BigDecimal bonifCargo = sueldoBase.multiply(rrhhProperties.getBonifCargo()).setScale(2, RoundingMode.HALF_UP);
+
+                // Sueldo devengado: proporcional a los días trabajados en el período (S/contrato / 30 × días)
+                // Permite cálculo progresivo durante el mes sin mostrar el sueldo completo del contrato
+                BigDecimal sueldoDevengado = sueldoBase
+                    .divide(BigDecimal.valueOf(30), 4, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(diasTrabajados))
+                    .setScale(2, RoundingMode.HALF_UP);
+
+                String nombreDpto = contrato.getDepartamento() != null
+                    ? contrato.getDepartamento().getNombre() : "";
+                boolean esClinico = DPTOS_CLINICOS.contains(nombreDpto);
+                // Nocturno: se detecta por los registros reales del período (horaEntrada >= 19:00)
+                long diasNocturnos = registros.stream()
+                    .filter(r -> r.getHoraEntrada() != null && r.getHoraEntrada().getHour() >= 19)
+                    .count();
+                boolean esNocturno = diasNocturnos > 0 && diasNocturnos >= diasTrabajados / 2;
+
+                // Bonifs y bruto se calculan sobre el sueldo completo del contrato.
+                // El devengado queda solo como dato informativo del progreso mensual.
+                BigDecimal bonifTurnoNocturno = esNocturno
+                    ? sueldoBase.multiply(rrhhProperties.getBonifNocturno()).setScale(2, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+
+                BigDecimal bonifGuardia = esClinico
+                    ? rrhhProperties.getBonifGuardia().multiply(BigDecimal.valueOf(30)).setScale(2, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+
+                BigDecimal bonifRiesgo = esClinico
+                    ? sueldoBase.multiply(rrhhProperties.getBonifRiesgo()).setScale(2, RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+
+                // Bonificacion por cargo: aplica a todo el personal (mismo criterio que
+                // los datos historicos sembrados), % configurado en rrhh.bonif-cargo.
+                BigDecimal bonifCargo = sueldoBase.multiply(rrhhProperties.getBonifCargo())
+                    .setScale(2, RoundingMode.HALF_UP);
 
                 BigDecimal sueldoBruto = sueldoBase
                     .add(montoHorasExtra)
@@ -192,7 +280,8 @@ public class NominaService implements INominaService {
                 nomina.setFechaInicio(request.getFechaInicio());
                 nomina.setFechaFin(request.getFechaFin());
                 nomina.setFechaEmision(LocalDate.now());
-                nomina.setSueldoBase(sueldoBase);
+                nomina.setSueldoContrato(sueldoBase);   // sueldo mensual del contrato
+                nomina.setSueldoBase(sueldoDevengado); // devengado proporcional a días trabajados
                 nomina.setTotalHorasTrabajadas(totalHorasTrabajadas);
                 nomina.setTotalHorasExtra(totalHorasExtra);
                 nomina.setTotalMinutosTardanza(totalMinutosTardanza);
@@ -201,6 +290,8 @@ public class NominaService implements INominaService {
                 nomina.setBonifGuardia(bonifGuardia);
                 nomina.setBonifRiesgo(bonifRiesgo);
                 nomina.setBonifCargo(bonifCargo);
+                nomina.setEsEmpleadoClinico(esClinico);
+                nomina.setTieneHorarioNocturno(esNocturno);
                 nomina.setDescuentoTardanzas(descuentoTardanzas);
                 nomina.setDescuentoLey(descuentoLey);
                 nomina.setAsignacionFamiliar(bonifFamiliar);
@@ -216,22 +307,20 @@ public class NominaService implements INominaService {
                 nomina.setTipoPensionAplicada(tipoPension);
                 nomina.setDetalles(detalles);
 
-                List<Nomina> existentes =
-                        nominaRepository.buscarPorEmpleadoYRango(empleado.getIdEmpleado(),
-                                request.getFechaInicio(), request.getFechaFin());
-                if (!existentes.isEmpty()) {
-                    // Reutilizar el mismo registro: UPDATE en lugar de INSERT
-                    Nomina existente = existentes.get(0);
+                Nomina existente = seleccionarNominaExistente(
+                    nominaRepository.buscarPorEmpleadoYPeriodo(empleado.getIdEmpleado(), periodo)
+                );
+                if (existente != null) {
                     nomina.setIdNomina(existente.getIdNomina());
                     nomina.setVersion(existente.getVersion() != null ? existente.getVersion() + 1 : 2);
+                    nomina.setNominaAnteriorId(existente.getNominaAnteriorId());
                 } else {
                     nomina.setVersion(1);
                 }
 
                 Nomina nominaGuardada = nominaRepository.guardar(nomina);
-                // Borrar detalles previos (en recálculo) y guardar los nuevos
-                detalleNominaRepository.eliminarPorNomina(nominaGuardada.getIdNomina());
                 detalles.forEach(d -> d.setIdNomina(nominaGuardada.getIdNomina()));
+                detalleNominaRepository.eliminarPorNomina(nominaGuardada.getIdNomina());
                 detalleNominaRepository.guardarTodos(detalles);
 
                 resultados.add(mapearAResponse(nominaGuardada, empleado));
@@ -253,6 +342,14 @@ public class NominaService implements INominaService {
         return resultados;
     }
 
+    private Nomina seleccionarNominaExistente(List<Nomina> nominas) {
+        if (nominas == null || nominas.isEmpty()) return null;
+        return nominas.stream()
+            .filter(n -> n.getIdNomina() != null)
+            .max((a, b) -> Integer.compare(a.getIdNomina(), b.getIdNomina()))
+            .orElse(nominas.get(0));
+    }
+
     @Override
     public NominaResponseDTO buscarNominaPorId(Integer idNomina) {
         Nomina nomina = nominaRepository.buscarPorId(idNomina)
@@ -264,11 +361,36 @@ public class NominaService implements INominaService {
 
     @Override
     public List<NominaResponseDTO> buscarPorPeriodo(String periodo) {
-        return nominaRepository.buscarPorPeriodo(periodo).stream()
-            .map(n -> {
-                EmpleadoModel emp = jpaEmpleadoRepository.findById(Objects.requireNonNull(n.getIdEmpleado())).orElse(null);
-                return mapearAResponse(n, emp);
-            })
+        List<Nomina> nominas = nominaRepository.buscarPorPeriodo(periodo);
+
+        // Deduplicar: quedarse con la nómina de mayor id por empleado
+        List<Nomina> deduplicadas = new ArrayList<>(nominas.stream()
+            .collect(Collectors.toMap(
+                Nomina::getIdEmpleado,
+                n -> n,
+                (n1, n2) -> (n2.getIdNomina() != null && (n1.getIdNomina() == null || n2.getIdNomina() > n1.getIdNomina())) ? n2 : n1
+            ))
+            .values());
+        deduplicadas.sort((a, b) -> {
+            if (a.getIdNomina() == null) return 1;
+            if (b.getIdNomina() == null) return -1;
+            return Integer.compare(a.getIdNomina(), b.getIdNomina());
+        });
+
+        // Una sola query para todos los empleados en vez de N queries
+        List<Long> ids = deduplicadas.stream()
+            .map(Nomina::getIdEmpleado)
+            .filter(Objects::nonNull)
+            .distinct()
+            .collect(Collectors.toList());
+
+        Map<Long, EmpleadoModel> empleadosPorId = ids.isEmpty() ? Map.of() :
+            jpaEmpleadoRepository.findAllById(ids)
+            .stream()
+            .collect(Collectors.toMap(EmpleadoModel::getIdEmpleado, e -> e));
+
+        return deduplicadas.stream()
+            .map(n -> mapearAResponse(n, empleadosPorId.get(n.getIdEmpleado())))
             .collect(Collectors.toList());
     }
 
@@ -348,9 +470,8 @@ public class NominaService implements INominaService {
         BigDecimal valorMinuto = valorHora.divide(BigDecimal.valueOf(MINUTOS_EN_HORA), 4, RoundingMode.HALF_UP);
 
         BigDecimal montoHorasExtra = calcularMontoHorasExtra(totalHorasExtra, valorHora);
-        BigDecimal bonifFamiliar = tieneHijos
-            ? sueldoBase.multiply(rrhhProperties.getBonifFamiliar()).multiply(BigDecimal.valueOf(cantidadHijos))
-                .setScale(2, RoundingMode.HALF_UP)
+        BigDecimal bonifFamiliar = tieneHijos && cantidadHijos > 0
+            ? rrhhProperties.getRmv().multiply(rrhhProperties.getBonifFamiliar()).setScale(2, RoundingMode.HALF_UP)
             : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         BigDecimal bonifTurnoNocturno = totalHorasNocturnas.multiply(valorHora).multiply(rrhhProperties.getBonifNocturno())
             .setScale(2, RoundingMode.HALF_UP);
@@ -494,39 +615,36 @@ public class NominaService implements INominaService {
         }
     }
 
-    private void validarDatosAsistencia(List<RegistroAsistenciaModel> registros, EmpleadoModel empleado) {
-        for (RegistroAsistenciaModel r : registros) {
-            if (r.getHoraEntrada() == null || r.getHoraSalida() == null) {
-                throw new IllegalStateException(
-                    "Error: El empleado " + empleado.getNombres() +
-                    " tiene registros de asistencia incompletos (falta entrada o salida) en la fecha: " + r.getFecha()
-                );
-            }
-            if (!r.getHoraSalida().isAfter(r.getHoraEntrada())) {
-                throw new IllegalStateException(
-                    "Error: El empleado " + empleado.getNombres() +
-                    " tiene horas inconsistentes (salida menor a entrada) en la fecha: " + r.getFecha()
-                );
-            }
-        }
+    /** Minutos entre entrada y salida, sumando 24h si la salida cruza medianoche
+     * (turno nocturno, ej. entrada 22:00 / salida 06:00 del dia siguiente). */
+    private long minutosEntreHorario(java.time.LocalTime entrada, java.time.LocalTime salida) {
+        long minutos = java.time.Duration.between(entrada, salida).toMinutes();
+        return minutos < 0 ? minutos + 24 * 60 : minutos;
     }
 
     private BigDecimal calcularTotalHorasTrabajadas(List<RegistroAsistenciaModel> registros) {
         return registros.stream()
             .map(r -> {
-                long minutos = java.time.Duration.between(r.getHoraEntrada(), r.getHoraSalida()).toMinutes();
+                long minutos = minutosEntreHorario(r.getHoraEntrada(), r.getHoraSalida());
                 return BigDecimal.valueOf(minutos)
                     .divide(BigDecimal.valueOf(MINUTOS_EN_HORA), 2, RoundingMode.HALF_UP);
             })
             .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    private int contarHijos(Long idEmpleado) {
-        List<FamiliaInfoModel> familia = jpaFamiliaInfoRepository
-            .findByEmpleadoIdEmpleadoAndActivoTrue(idEmpleado);
+    private int contarHijosDesdeCache(List<FamiliaInfoModel> familia) {
         return (int) familia.stream()
-            .filter(f -> "HIJO".equals(f.getParentesco()))
+            .filter(f -> "HIJO".equals(f.getParentesco())
+                    && Boolean.TRUE.equals(f.getElegibleAsignacionFamiliar())
+                    && Boolean.TRUE.equals(f.getValidado()))
             .count();
+    }
+
+    private String resolverTipoPension(String regimenPerfil, String tipoContrato) {
+        if ("AFP".equalsIgnoreCase(regimenPerfil)) return "AFP";
+        if ("ONP".equalsIgnoreCase(regimenPerfil)) return "ONP";
+        if ("AFP".equalsIgnoreCase(tipoContrato)) return "AFP";
+        return "ONP";
     }
 
     private List<DetalleNomina> generarDetallesDiarios(
@@ -535,7 +653,7 @@ public class NominaService implements INominaService {
             BigDecimal valorMinuto) {
 
         return registros.stream().map(r -> {
-            long minutosTrabajados = java.time.Duration.between(r.getHoraEntrada(), r.getHoraSalida()).toMinutes();
+            long minutosTrabajados = minutosEntreHorario(r.getHoraEntrada(), r.getHoraSalida());
             BigDecimal horasTrabajadas = BigDecimal.valueOf(minutosTrabajados)
                 .divide(BigDecimal.valueOf(MINUTOS_EN_HORA), 2, RoundingMode.HALF_UP);
 
@@ -575,6 +693,7 @@ public class NominaService implements INominaService {
         if (empleado != null) {
             dto.setNombreEmpleado(empleado.getNombres() + " " + empleado.getApellidos());
         }
+        dto.setSueldoContrato(nomina.getSueldoContrato());
         dto.setSueldoBase(nomina.getSueldoBase());
         dto.setTotalHorasTrabajadas(nomina.getTotalHorasTrabajadas());
         dto.setTotalHorasExtra(nomina.getTotalHorasExtra());
@@ -595,6 +714,8 @@ public class NominaService implements INominaService {
         dto.setCantidadGuardias(nomina.getCantidadGuardias());
         dto.setTotalHorasNocturnas(nomina.getTotalHorasNocturnas());
         dto.setTipoPensionAplicada(nomina.getTipoPensionAplicada());
+        dto.setEsEmpleadoClinico(nomina.getEsEmpleadoClinico() != null ? nomina.getEsEmpleadoClinico() : false);
+        dto.setTieneHorarioNocturno(nomina.getTieneHorarioNocturno() != null ? nomina.getTieneHorarioNocturno() : false);
 
         if (nomina.getDetalles() != null) {
             List<DetalleNominaResponseDTO> detallesDTO = nomina.getDetalles().stream()
@@ -619,6 +740,12 @@ public class NominaService implements INominaService {
 
     private List<RegistroAsistenciaModel> filtrarRegistrosValidos(List<RegistroAsistenciaModel> registros) {
         Map<LocalDate, List<RegistroAsistenciaModel>> porFecha = registros.stream()
+                // Solo registros completos: ambas horas presentes y con duracion real
+                // (usa minutosEntreHorario para no descartar turnos nocturnos que
+                // cruzan medianoche, donde horaSalida < horaEntrada como LocalTime).
+                .filter(r -> r.getHoraEntrada() != null
+                        && r.getHoraSalida() != null
+                        && minutosEntreHorario(r.getHoraEntrada(), r.getHoraSalida()) > 0)
                 .collect(Collectors.groupingBy(RegistroAsistenciaModel::getFecha));
         return porFecha.values().stream().flatMap(lista -> {
             boolean tieneCorreccion = lista.stream()

@@ -87,7 +87,22 @@ public class ActualizarEmpleadoUseCase {
             empleado.setDireccion(dto.getDireccion());
         }
 
-        if (dto.getCorreo() != null && !dto.getCorreo().isBlank()) {
+        if (dto.getCorreo() != null && !dto.getCorreo().isBlank()
+                && !dto.getCorreo().equalsIgnoreCase(empleado.getCorreo())) {
+            if (empleadoRepository.existsByCorreo(dto.getCorreo())) {
+                return new EmpleadoResponseDTO(
+                        false,
+                        "Ya existe un empleado registrado con ese correo",
+                        empleado.getIdEmpleado(),
+                        empleado.getNombres() + " " + empleado.getApellidos(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        empleado.getEstado()
+                );
+            }
             empleado.setCorreo(dto.getCorreo());
         }
 
@@ -104,11 +119,6 @@ public class ActualizarEmpleadoUseCase {
         String cambiosContrato = "";
 
         if (contrato != null) {
-            if (dto.getCargo() != null && !dto.getCargo().isBlank()) {
-                contrato.cambiarCargo(dto.getCargo());
-                cambiosContrato += ", cargo=" + dto.getCargo();
-            }
-
             if (dto.getSueldo() != null && dto.getSueldo().compareTo(java.math.BigDecimal.ZERO) > 0) {
                 contrato.cambiarSueldo(dto.getSueldo());
                 cambiosContrato += ", sueldo=" + dto.getSueldo();

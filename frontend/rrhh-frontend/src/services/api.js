@@ -1,62 +1,101 @@
 const BASE = import.meta.env.VITE_API_URL || '';
 
-export const getToken      = () => getUser().token;
 export const getUser       = () => JSON.parse(sessionStorage.getItem('user') || '{}');
 export const getIdEmpleado = () => getUser()?.idEmpleado ?? null;
 export const saveSession   = (token, rol, username, idEmpleado = null, requiereCambioPassword = false) =>
-  sessionStorage.setItem('user', JSON.stringify({ token, rol, username, idEmpleado, requiereCambioPassword }));
+  sessionStorage.setItem('user', JSON.stringify({ rol, username, idEmpleado, requiereCambioPassword }));
 export const clearSession  = () => sessionStorage.removeItem('user');
 
 const CRED = 'include';
 
-const json = (r) => {
-  if (r.status === 403) {
-    clearSession();
-    window.location.href = '/';
-    throw new Error('Sesión expirada');
+const STATUS_MESSAGES = {
+  200: 'Operacion realizada correctamente',
+  201: 'Recurso creado correctamente',
+  204: 'Operacion realizada correctamente',
+  400: 'Verifique los datos ingresados.',
+  401: 'Sesion expirada. Inicie sesion nuevamente.',
+  403: 'No tiene permisos para realizar esta accion.',
+  404: 'No se encontro la informacion solicitada.',
+  409: 'La informacion ya fue modificada. Actualice e intente nuevamente.',
+  422: 'No se pudo procesar la informacion enviada.',
+  500: 'No se pudo completar la operacion. Intente nuevamente.',
+  502: 'El servidor no respondio correctamente.',
+  503: 'Servicio no disponible temporalmente.',
+};
+
+const statusMessage = (status) => STATUS_MESSAGES[status] || `Respuesta HTTP ${status}`;
+
+const extractMessage = (text) => {
+  if (!text) return '';
+  try {
+    const parsed = JSON.parse(text);
+    return parsed?.message || parsed?.mensaje || parsed?.error || parsed?.detail || text;
+  } catch {
+    return text;
   }
-  // Para 400, 500 y similares intentamos parsear el JSON del backend antes de fallar
-  if (!r.ok) return r.json().catch(() => { throw new Error(`HTTP ${r.status}`); });
-  return r.json();
+};
+
+export const formatApiError = (status, detail = '') => {
+  const cleanDetail = detail && !detail.startsWith('<') ? detail.trim() : '';
+  if (cleanDetail) {
+    if (/access denied/i.test(cleanDetail)) return 'No tiene permisos para consultar esta informacion.';
+    return cleanDetail;
+  }
+  return statusMessage(status);
+};
+
+const json = (r) => {
+  if (!r.ok) return r.text().then(text => {
+    const msg = formatApiError(r.status, extractMessage(text));
+    const shouldNotify = r.status === 401 || r.status === 0;
+    if (shouldNotify) {
+      window.dispatchEvent(new CustomEvent('api-error', { detail: { status: r.status, message: msg } }));
+    }
+    if (r.status === 401) {
+      clearSession();
+      if (window.location.pathname !== '/') sessionStorage.setItem('lastApiError', msg);
+      if (window.location.pathname !== '/') window.location.href = '/';
+    }
+    const error = new Error(msg);
+    error.status = r.status;
+    throw error;
+  });
+  if (r.status === 204) return null;
+  return r.json().catch(() => ({}));
 };
 
 const h = () => {
-  const headers = { 'Content-Type': 'application/json' };
-  const token = getToken();
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  return headers;
+  return { 'Content-Type': 'application/json' };
 };
 
 const f = (url, opts = {}) =>
-  fetch(url, { ...opts, credentials: CRED }).then(r => {
-    const newToken = r.headers.get('X-New-Token');
-    if (newToken) {
-      const user = getUser();
-      saveSession(newToken, user.rol, user.username, user.idEmpleado);
-    }
-    return r;
+  fetch(url, { ...opts, credentials: CRED }).catch(() => {
+    const msg = 'No se pudo conectar con el servidor. Verifique que el backend este disponible.';
+    window.dispatchEvent(new CustomEvent('api-error', { detail: { status: 0, message: msg } }));
+    throw new Error(msg);
   });
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
 export const solicitarRecuperacion = (identifier) =>
-  fetch(`${BASE}/api/v1/auth/recovery`, {
+  f(`${BASE}/api/v1/auth/recovery`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: h(),
     body: JSON.stringify({ identifier }),
-  }).then(r => r.json().catch(() => { throw new Error(`HTTP ${r.status}`); }));
+  }).then(json);
 
 export const resetPassword = (token, nuevaContrasenia, confirmarContrasenia) =>
-  fetch(`${BASE}/api/v1/auth/reset-password`, {
+  f(`${BASE}/api/v1/auth/reset-password`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: h(),
     body: JSON.stringify({ token, nuevaContrasenia, confirmarContrasenia }),
-  }).then(r => r.json().catch(() => { throw new Error(`HTTP ${r.status}`); }));
+  }).then(json);
 
 export const setPassword = (nuevaContrasenia, confirmarContrasenia) =>
   f(`${BASE}/api/v1/auth/set-password`, {
     method: 'POST', headers: h(),
     body: JSON.stringify({ nuevaContrasenia, confirmarContrasenia }),
   }).then(json);
+
 export const getMe = () =>
   f(`${BASE}/api/v1/auth/me`, { headers: { 'Content-Type': 'application/json' } }).then(r => {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -173,6 +212,29 @@ export const cambioSalarial = (id, dto) =>
 export const getHistorialEmpleado = (idEmpleado) =>
   f(`${BASE}/api/v1/empleados/${idEmpleado}/historial`, { headers: h() }).then(json);
 
+export const getBeneficiosEmpleado = (idEmpleado) =>
+  f(`${BASE}/api/v1/empleados/${idEmpleado}/beneficios`, { headers: h() }).then(json);
+
+export const guardarPerfilBeneficios = (idEmpleado, dto) =>
+  f(`${BASE}/api/v1/empleados/${idEmpleado}/beneficios`, {
+    method: 'PUT', headers: h(), body: JSON.stringify(dto),
+  }).then(json);
+
+export const agregarFamiliarEmpleado = (idEmpleado, dto) =>
+  f(`${BASE}/api/v1/empleados/${idEmpleado}/beneficios/familiares`, {
+    method: 'POST', headers: h(), body: JSON.stringify(dto),
+  }).then(json);
+
+export const actualizarFamiliarEmpleado = (idEmpleado, idFamiliar, dto) =>
+  f(`${BASE}/api/v1/empleados/${idEmpleado}/beneficios/familiares/${idFamiliar}`, {
+    method: 'PUT', headers: h(), body: JSON.stringify(dto),
+  }).then(json);
+
+export const eliminarFamiliarEmpleado = (idEmpleado, idFamiliar) =>
+  f(`${BASE}/api/v1/empleados/${idEmpleado}/beneficios/familiares/${idFamiliar}`, {
+    method: 'DELETE', headers: h(),
+  }).then(r => (r.status === 204 ? true : json(r)));
+
 // ── ASISTENCIA ────────────────────────────────────────────────────────────────
 export const registrarManual = (dto) =>
   f(`${BASE}/api/v1/asistencia/manual`, {
@@ -181,6 +243,14 @@ export const registrarManual = (dto) =>
 
 export const getAsistenciaHoy = (idEmpleado) =>
   f(`${BASE}/api/v1/asistencia/hoy/${idEmpleado}`, { headers: h() }).then(r => {
+    if (!r.ok) return json(r);
+    if (r.status === 204) return null;
+    return r.json();
+  });
+
+export const getMiAsistenciaHoy = () =>
+  f(`${BASE}/api/v1/asistencia/mi/hoy`, { headers: h() }).then(r => {
+    if (!r.ok) return json(r);
     if (r.status === 204) return null;
     return r.json();
   });
@@ -188,18 +258,38 @@ export const getAsistenciaHoy = (idEmpleado) =>
 export const listarAsistenciaEmpleado = (idEmpleado) =>
   f(`${BASE}/api/v1/asistencia/empleado/${idEmpleado}`, { headers: h() }).then(json);
 
+export const listarMiAsistencia = () =>
+  f(`${BASE}/api/v1/asistencia/mi/empleado`, { headers: h() }).then(json);
+
 export const listarJustificacionesPendientes = () =>
   f(`${BASE}/api/v1/asistencia/justificaciones/pendientes`, { headers: h() }).then(json);
 
+export const listarTodasJustificaciones = () =>
+  f(`${BASE}/api/v1/asistencia/justificaciones/todas`, { headers: h() }).then(json);
+
+export const listarCorreccionesRegistradas = () =>
+  f(`${BASE}/api/v1/asistencia/correcciones-registradas`, { headers: h() }).then(json);
+
+export const obtenerPlanRecuperacion = (idJustificacion) =>
+  f(`${BASE}/api/v1/asistencia/plan-recuperacion/${idJustificacion}`, { headers: h() }).then(json);
+
 export const listarJustificacionesEmpleado = (idEmpleado) =>
   f(`${BASE}/api/v1/asistencia/justificaciones/empleado/${idEmpleado}`, { headers: h() }).then(json);
+
+export const listarMisJustificaciones = () =>
+  f(`${BASE}/api/v1/asistencia/mi/justificaciones`, { headers: h() }).then(json);
+
+export const getHorarioEmpleado = (idEmpleado) =>
+  f(`${BASE}/api/v1/asistencia/horario/${idEmpleado}`, { headers: h() }).then(json);
+
+export const getMiHorario = () =>
+  f(`${BASE}/api/v1/asistencia/mi/horario`, { headers: h() }).then(json);
 
 export const uploadEvidencia = (file) => {
   const fd = new FormData();
   fd.append("file", file);
   return f(`${BASE}/api/v1/asistencia/upload-evidencia`, {
     method: "POST",
-    headers: { Authorization: h().Authorization },
     body: fd,
   }).then(json);
 };
@@ -240,6 +330,11 @@ export const enviarComprobante = (id) =>
     method: 'POST', headers: h(),
   }).then(json);
 
+export const enviarComprobantesPeriodo = (periodo) =>
+  f(`${BASE}/api/nomina/periodo/${periodo}/enviar`, {
+    method: 'POST', headers: h(),
+  }).then(json);
+
 export const ajustarNomina = (id, dto) =>
   f(`${BASE}/api/nomina/${id}/ajustar`, {
     method: 'PUT', headers: h(), body: JSON.stringify(dto),
@@ -251,6 +346,31 @@ export const descargarComprobante = (id) =>
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.blob();
   });
+
+// ── GALERÍA ───────────────────────────────────────────────────────────────────
+export const listarGaleria = (idEmpleado) =>
+  f(`${BASE}/api/v1/galeria/empleado/${idEmpleado}`, { headers: h() }).then(json);
+
+export const subirFotoGaleria = (idEmpleado, file) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("idEmpleado", idEmpleado);
+  return f(`${BASE}/api/v1/galeria/subir`, { method: "POST", body: fd }).then(json);
+};
+
+export const eliminarFotoGaleria = (id) =>
+  f(`${BASE}/api/v1/galeria/${id}`, { method: "DELETE", headers: h() }).then(json);
+
+// ── APP MÓVIL ─────────────────────────────────────────────────────────────────
+export const enviarLinkApp = (idEmpleado) =>
+  f(`${BASE}/api/v1/empleados/${idEmpleado}/enviar-app`, {
+    method: 'POST', headers: h(),
+  }).then(json);
+
+export const confirmarAppInstalada = (idEmpleado) =>
+  f(`${BASE}/api/v1/empleados/${idEmpleado}/confirmar-app`, {
+    method: 'POST', headers: h(),
+  }).then(json);
 
 // ── SOLICITUDES ───────────────────────────────────────────────────────────────
 export const registrarSolicitud = (dto) =>
@@ -286,12 +406,16 @@ export const getSolicitudesPorEstado = (estado) =>
 export const getSolicitudesPorEmpleado = (idEmpleado) =>
   f(`${BASE}/api/solicitud/empleado/${idEmpleado}`, { headers: h() }).then(json);
 
+export const getMiSaldoVacaciones = () =>
+  f(`${BASE}/api/v1/solicitudes/mi/saldo-vacaciones`, { headers: h() }).then(json);
+
 // ── REPORTES ──────────────────────────────────────────────────────────────────
-// ECU-06: params = { tipo, formato, mes, anio, fechaInicio, fechaFin, estado, ... }
+// ECU-06: params = { tipo, mes, anio, fechaInicio, fechaFin, estado, ... }
+// Devuelve el JSON de vista previa; el formato (PDF/XLSX/CSV) se aplica en el
+// cliente al exportar, no aqui.
 export const generarReporte = (params) => {
-  const { tipo, formato, ...filtros } = params;
-  const query = formato ? `?formato=${encodeURIComponent(formato)}` : '';
-  return f(`${BASE}/api/reporte/${tipo}${query}`, {
+  const { tipo, ...filtros } = params;
+  return f(`${BASE}/api/reporte/${tipo}`, {
     method: 'POST', headers: h(), body: JSON.stringify(filtros),
-  });
+  }).then(json);
 };

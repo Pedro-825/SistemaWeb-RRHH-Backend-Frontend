@@ -21,12 +21,28 @@ public class UsuarioGestionRepositoryImpl implements IUsuarioGestionRepository {
 
     @Override
     public UsuarioGestion save(UsuarioGestion usuario) {
+        Objects.requireNonNull(usuario);
 
-        UsuarioModel model =
-                UsuarioGestionMapper.toModel(usuario);
+        // UsuarioGestion solo representa un subconjunto de columnas de UsuarioModel
+        // (no conoce dosfaSecret, intentosFallidos, cuentaBloqueada, appMovilInstalada,
+        // tokenInvalidoDesde, etc.). Si se construyera un UsuarioModel desde cero con
+        // UsuarioGestionMapper.toModel(...) y se guardara asi, el merge de JPA
+        // sobreescribiria esas columnas con sus valores por defecto (null/false) --
+        // por ejemplo borrando el secreto 2FA cada vez que se sanciona/asciende/
+        // desactiva a un empleado, sin que esa fuera la intencion de esas acciones.
+        // Por eso se carga primero el modelo existente y solo se le aplican los
+        // campos que este dominio realmente gestiona.
+        UsuarioModel model = usuario.getIdUsuario() != null
+                ? jpaRepository.findById(usuario.getIdUsuario()).orElseGet(() -> UsuarioGestionMapper.toModel(usuario))
+                : UsuarioGestionMapper.toModel(usuario);
 
-        UsuarioModel saved =
-                jpaRepository.save(Objects.requireNonNull(model));
+        model.setNombreUsuario(usuario.getNombreUsuario());
+        model.setCorreoInst(usuario.getCorreoInst());
+        model.setContrasenia(usuario.getContrasenia());
+        model.setActivo(usuario.getActivo());
+        model.setDosfaActivo(usuario.getDosfaActivo());
+
+        UsuarioModel saved = jpaRepository.save(model);
 
         return UsuarioGestionMapper.toDomain(saved);
     }

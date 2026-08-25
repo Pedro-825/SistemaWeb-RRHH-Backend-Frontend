@@ -1,6 +1,8 @@
 import { useState } from "react";
 import * as XLSX from "xlsx";
 import Sidebar from "../components/Sidebar";
+import Spinner from "../components/Spinner";
+import ApiAlert from "../components/ApiAlert";
 import logo from "../assets/logo.png";
 import "../styles/Dashboard.css";
 import { generarReporte } from "../services/api";
@@ -36,12 +38,23 @@ export default function GenerarReportes() {
   const [fechaIni,  setFechaIni]  = useState("");
   const [fechaFin,  setFechaFin]  = useState("");
   const [estado,    setEstado]    = useState("");
+  // Filtros propios de cada tipo de reporte
+  const [estadoAsistencia,   setEstadoAsistencia]   = useState("");
+  const [tipoRegistro,       setTipoRegistro]       = useState("");
+  const [minutosTardanzaMin, setMinutosTardanzaMin] = useState("");
+  const [estadoPago,         setEstadoPago]         = useState("");
+  const [horasExtraMin,      setHorasExtraMin]      = useState("");
+  const [horasExtraMax,      setHorasExtraMax]      = useState("");
+  const [diasMin,            setDiasMin]            = useState("");
+  const [diasMax,            setDiasMax]            = useState("");
+  const [fechaIngresoInicio, setFechaIngresoInicio] = useState("");
+  const [fechaIngresoFin,    setFechaIngresoFin]    = useState("");
+  const [rol,                setRol]                = useState("");
   const [generando, setGenerando] = useState(false);
   const [mensaje,   setMensaje]   = useState("");
   const [error,     setError]     = useState("");
   const [resultado, setResultado] = useState(null);
   const [historial, setHistorial] = useState([]);
-  const [modalPreview, setModalPreview] = useState(false);
 
   const nombreArchivo = (ext) =>
     `reporte_${tipoSeleccionado}_${new Date().toISOString().split("T")[0]}.${ext}`;
@@ -88,9 +101,9 @@ export default function GenerarReportes() {
   .hdr p{margin:0;font-size:11px;color:#64748b}
   h2{margin:0 0 4px;font-size:13px;color:#3b82f6}
   .meta{color:#64748b;font-size:11px;margin:0 0 14px}
-  table{border-collapse:collapse;width:100%}
-  th{background:#3b82f6;color:#fff;padding:6px 8px;text-align:left;border:1px solid #2563eb}
-  td{padding:4px 8px;border:1px solid #e2e8f0}
+  table{border-collapse:collapse;width:100%;table-layout:fixed}
+  th{background:#3b82f6;color:#fff;padding:8px;text-align:center;vertical-align:middle;border:1px solid #2563eb}
+  td{padding:7px 8px;text-align:center;vertical-align:middle;border:1px solid #e2e8f0;word-break:break-word}
   tr:nth-child(even){background:#f8fafc}
   .footer{margin-top:16px;font-size:10px;color:#94a3b8}
   .print-btn{margin-top:14px;padding:8px 18px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px}
@@ -128,47 +141,45 @@ export default function GenerarReportes() {
 
     const params = {
       tipo:    tipoSeleccionado,
-      formato: undefined,
       fechaInicio: inicio,
       fechaFin:    fin,
       estado:     (tipoSeleccionado === "solicitudes" || tipoSeleccionado === "empleados") ? estado || undefined : undefined,
     };
 
+    if (tipoSeleccionado === "asistencia") {
+      params.estado = estadoAsistencia || undefined;
+      params.tipoRegistro = tipoRegistro || undefined;
+      params.minutosTardanzaMin = minutosTardanzaMin ? Number(minutosTardanzaMin) : undefined;
+    }
+    if (tipoSeleccionado === "nomina") {
+      params.estadoPago = estadoPago || undefined;
+      params.horasExtraMin = horasExtraMin ? Number(horasExtraMin) : undefined;
+      params.horasExtraMax = horasExtraMax ? Number(horasExtraMax) : undefined;
+    }
+    if (tipoSeleccionado === "solicitudes") {
+      params.diasMin = diasMin ? Number(diasMin) : undefined;
+      params.diasMax = diasMax ? Number(diasMax) : undefined;
+    }
+    if (tipoSeleccionado === "empleados") {
+      params.fechaIngresoInicio = fechaIngresoInicio || undefined;
+      params.fechaIngresoFin = fechaIngresoFin || undefined;
+      params.rol = rol || undefined;
+    }
+
     try {
-      // generarReporte returns raw Response — must resolve content-type before consuming body
-      const response = await generarReporte(params);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-      const contentType = response.headers.get("content-type") || "";
-      const isFile = contentType.includes("application/pdf")
-        || contentType.includes("application/vnd")
-        || contentType.includes("text/csv")
-        || contentType.includes("application/octet-stream");
-
-      if (isFile) {
-        const blob = await response.blob();
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement("a");
-        a.href     = url;
-        const ext = formato === "EXCEL" ? "xlsx" : formato.toLowerCase();
-        a.download = `reporte_${tipoSeleccionado}_${new Date().toISOString().split("T")[0]}.${ext}`;
-        a.click();
-        URL.revokeObjectURL(url);
-        setMensaje("Reporte generado y descargado correctamente.");
-        setHistorial(h => [{ tipo: tipoSeleccionado, formato, fecha: new Date().toLocaleString("es-PE"), estado: "Descargado" }, ...h].slice(0, 10));
+      // "Generar" siempre trae el JSON para la vista previa; el formato elegido
+      // (PDF/XLSX/CSV) se usa despues, al presionar "Exportar".
+      const data = await generarReporte(params);
+      const lista = Array.isArray(data) ? data : (data?.datos ?? data?.data ?? data?.content ?? []);
+      setResultado(lista);
+      if (lista.length === 0) {
+        setMensaje("No se encontraron datos para el período o filtros seleccionados. Pruebe con otro mes o amplíe los criterios.");
       } else {
-        const data = await response.json();
-        const lista = Array.isArray(data) ? data : (data?.datos ?? data?.data ?? data?.content ?? []);
-        setResultado(lista);
-        if (lista.length === 0) {
-          setMensaje("No se encontraron datos para el período o filtros seleccionados. Pruebe con otro mes o amplíe los criterios.");
-        } else {
-          setMensaje(`Reporte generado correctamente — ${lista.length} registro(s) encontrado(s).`);
-        }
-        setHistorial(h => [{ tipo: tipoSeleccionado, formato, fecha: new Date().toLocaleString("es-PE"), estado: lista.length > 0 ? "Generado" : "Sin datos" }, ...h].slice(0, 10));
+        setMensaje(`Reporte generado correctamente — ${lista.length} registro(s) encontrado(s).`);
       }
-    } catch {
-      setError("Error al generar el reporte. Verifique los filtros e intente de nuevo.");
+      setHistorial(h => [{ tipo: tipoSeleccionado, formato, fecha: new Date().toLocaleString("es-PE"), estado: lista.length > 0 ? "Generado" : "Sin datos" }, ...h].slice(0, 10));
+    } catch (e) {
+      setError(e);
     } finally {
       setGenerando(false);
     }
@@ -182,7 +193,7 @@ export default function GenerarReportes() {
     );
     const keys = Object.keys(resultado[0]);
     return (
-      <table>
+      <table className="reportes-results-table">
         <thead><tr>{keys.map(k => <th key={k}>{k}</th>)}</tr></thead>
         <tbody>
           {resultado.slice(0, 50).map((row, i) => (
@@ -208,8 +219,8 @@ export default function GenerarReportes() {
           </div>
         </header>
 
-        {mensaje && <div className="alert alert-success">✅ {mensaje}</div>}
-        {error   && <div className="alert alert-warning">⚠️ {error}</div>}
+        <ApiAlert type="success" message={mensaje} />
+        <ApiAlert type="error" message={error} />
 
         <div className="reportes-layout">
 
@@ -260,7 +271,7 @@ export default function GenerarReportes() {
                     </div>
                   </>)}
 
-                  {(tipoSeleccionado === "empleados" || tipoSeleccionado === "solicitudes") && (<>
+                  {tipoSeleccionado === "solicitudes" && (<>
                     <div className="form-group">
                       <label>Fecha Desde</label>
                       <input type="date" value={fechaIni} onChange={e => setFechaIni(e.target.value)} />
@@ -277,38 +288,116 @@ export default function GenerarReportes() {
                       <select value={estado} onChange={e => setEstado(e.target.value)}>
                         <option value="">Todos</option>
                         {tipoSeleccionado === "solicitudes"
-                          ? <><option value="PENDIENTE">Pendiente</option><option value="APROBADO">Aprobado</option><option value="RECHAZADO">Rechazado</option></>
-                          : <><option value="ACTIVO">Activo</option><option value="INACTIVO">Inactivo</option></>
+                          ? <><option value="PENDIENTE">Pendiente</option><option value="APROBADA">Aprobado</option><option value="RECHAZADA">Rechazado</option></>
+                          : <><option value="ACTIVO">Activo</option><option value="SUSPENDIDO">Suspendido</option><option value="DESVINCULADO">Desvinculado</option></>
                         }
                       </select>
                     </div>
                   )}
+
+                  {tipoSeleccionado === "asistencia" && (<>
+                    <div className="form-group">
+                      <label>Estado</label>
+                      <select value={estadoAsistencia} onChange={e => setEstadoAsistencia(e.target.value)}>
+                        <option value="">Todos</option>
+                        <option value="PUNTUAL">Puntual</option>
+                        <option value="TARDANZA">Tardanza</option>
+                        <option value="JUSTIFICADA">Justificada</option>
+                        <option value="INASISTENCIA">Inasistencia</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Tipo de Registro</label>
+                      <select value={tipoRegistro} onChange={e => setTipoRegistro(e.target.value)}>
+                        <option value="">Todos</option>
+                        <option value="ORIGINAL">Original (biométrico)</option>
+                        <option value="CORRECCION">Corrección manual</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Tardanza mínima (min)</label>
+                      <input type="number" min="0" value={minutosTardanzaMin} onChange={e => setMinutosTardanzaMin(e.target.value)} placeholder="Ej: 30" />
+                    </div>
+                  </>)}
+
+                  {tipoSeleccionado === "nomina" && (<>
+                    <div className="form-group">
+                      <label>Estado de Pago</label>
+                      <select value={estadoPago} onChange={e => setEstadoPago(e.target.value)}>
+                        <option value="">Todos</option>
+                        <option value="CALCULADA">Calculada</option>
+                        <option value="AJUSTADA">Ajustada</option>
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label>Horas Extra (mín)</label>
+                      <input type="number" min="0" value={horasExtraMin} onChange={e => setHorasExtraMin(e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label>Horas Extra (máx)</label>
+                      <input type="number" min="0" value={horasExtraMax} onChange={e => setHorasExtraMax(e.target.value)} />
+                    </div>
+                  </>)}
+
+                  {tipoSeleccionado === "solicitudes" && (<>
+                    <div className="form-group">
+                      <label>Días solicitados (mín)</label>
+                      <input type="number" min="0" value={diasMin} onChange={e => setDiasMin(e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label>Días solicitados (máx)</label>
+                      <input type="number" min="0" value={diasMax} onChange={e => setDiasMax(e.target.value)} />
+                    </div>
+                  </>)}
+
+                  {tipoSeleccionado === "empleados" && (<>
+                    <div className="form-group">
+                      <label>Ingreso Desde</label>
+                      <input type="date" value={fechaIngresoInicio} onChange={e => setFechaIngresoInicio(e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label>Ingreso Hasta</label>
+                      <input type="date" value={fechaIngresoFin} onChange={e => setFechaIngresoFin(e.target.value)} />
+                    </div>
+                    <div className="form-group">
+                      <label>Rol Asignado</label>
+                      <select value={rol} onChange={e => setRol(e.target.value)}>
+                        <option value="">Todos</option>
+                        <option value="EMPLEADO">Empleado</option>
+                        <option value="RRHH">RRHH</option>
+                        <option value="GERENCIA">Gerencia</option>
+                      </select>
+                    </div>
+                  </>)}
                 </div>
                 <div className="form-actions" style={{ marginTop: 16, flexWrap: "wrap", gap: "8px" }}>
                   <button type="submit" className="btn btn-primary" disabled={generando}>
                     {generando ? "Generando..." : "📊 Generar Reporte"}
                   </button>
-                  {resultado && resultado.length > 0 && (<>
-                    <button type="button" className="btn btn-secondary" onClick={() => setModalPreview(true)}>
-                      👁 Vista Previa
-                    </button>
+                  {resultado && resultado.length > 0 && (
                     <button type="button" className="btn btn-secondary" onClick={exportar}>
                       💾 Exportar
                     </button>
-                  </>)}
+                  )}
                 </div>
               </form>
             </div>
 
             {resultado && (
-              <div className="section-card" style={{ padding: 0, overflow: "hidden" }}>
-                <div style={{ padding: "16px 20px 10px" }}>
+              <div className="section-card reportes-results-card" style={{ padding: 0, overflow: "hidden" }}>
+                <div className="reportes-results-header">
                   <h2 style={{ margin: 0 }}>
                     Resultados — {tipoActual?.label}
                     <span className="badge badge-success" style={{ marginLeft: 10, fontSize: "12px" }}>{resultado.length} registros</span>
                   </h2>
                 </div>
-                <div className="table-wrapper" style={{ marginBottom: 0 }}>{renderTabla()}</div>
+                <div className="table-wrapper reportes-results-table-wrap" style={{ marginBottom: 0 }}>{renderTabla()}</div>
+              </div>
+            )}
+
+            {generando && (
+              <div className="section-card">
+                <Spinner text="Generando reporte..." />
               </div>
             )}
 
@@ -352,24 +441,6 @@ export default function GenerarReportes() {
           </div>
         </div>
       </main>
-
-      {modalPreview && resultado && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalPreview(false)}>
-          <div className="modal-box modal-box-wide">
-            <div className="modal-header">
-              <div><h3>👁 Vista Previa — {tipoActual?.label}</h3></div>
-              <button className="modal-close" onClick={() => setModalPreview(false)}>×</button>
-            </div>
-            <div className="modal-body" style={{ maxHeight: "60vh", overflowY: "auto" }}>
-              <div className="table-wrapper">{renderTabla()}</div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setModalPreview(false)}>Cerrar</button>
-              <button className="btn btn-secondary" onClick={exportar}>💾 Exportar</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 package com.rrhh.Modulos.CU4_RegistroAsistencia.Application.services;
 
+import com.rrhh.Modulos.CU2_GestionEmpleados.Application.services.AuditoriaEmpleadoService;
 import com.rrhh.Modulos.CU4_RegistroAsistencia.Domain.entities.Horario;
 import com.rrhh.Shared.persistence.HorarioModel;
 import com.rrhh.Shared.persistence.AsignacionHorarioModel;
@@ -13,6 +14,7 @@ import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -20,6 +22,12 @@ public class HorarioService {
 
     @PersistenceContext
     private EntityManager em;
+
+    private final AuditoriaEmpleadoService auditoriaEmpleadoService;
+
+    public HorarioService(AuditoriaEmpleadoService auditoriaEmpleadoService) {
+        this.auditoriaEmpleadoService = auditoriaEmpleadoService;
+    }
 
     public List<HorarioModel> listar() {
         return em.createQuery("SELECT h FROM HorarioModel h WHERE h.activo = true ORDER BY h.idHorario", HorarioModel.class)
@@ -61,12 +69,16 @@ public class HorarioService {
     public Map<String, Object> asignarHorario(Long idEmpleado, Integer idHorario,
                                                LocalDate fechaDesde, LocalDate fechaHasta,
                                                Boolean esTemporal) {
-        // Desactivar asignaciones activas anteriores del empleado
-        em.createQuery(
-                "UPDATE AsignacionHorarioModel a SET a.activo = false " +
-                "WHERE a.empleado.idEmpleado = :idEmp AND a.activo = true")
-                .setParameter("idEmp", idEmpleado)
-                .executeUpdate();
+        LocalDate inicioNueva = fechaDesde != null ? fechaDesde : LocalDate.now();
+
+        String valorAnterior = buscarTurnoActivo(idEmpleado)
+                .map(a -> a.getHorario().getNombreTurno() + " (" + a.getHorario().getHoraEntrada()
+                        + "-" + a.getHorario().getHoraSalida() + ")")
+                .orElse("Sin turno asignado");
+
+        // Cerrar asignaciones activas anteriores con fechaHasta = día anterior al inicio de la nueva,
+        // para que los rangos no se solapen y las justificaciones históricas encuentren el horario correcto.
+        cerrarAsignacionesActivas(idEmpleado, inicioNueva.minusDays(1));
 
         EmpleadoModel empleadoModel = em.find(EmpleadoModel.class, idEmpleado);
         HorarioModel horarioModel   = em.find(HorarioModel.class, idHorario);
@@ -77,12 +89,24 @@ public class HorarioService {
         AsignacionHorarioModel asignacion = new AsignacionHorarioModel();
         asignacion.setEmpleado(empleadoModel);
         asignacion.setHorario(horarioModel);
-        asignacion.setFechaDesde(fechaDesde != null ? fechaDesde : LocalDate.now());
+        asignacion.setFechaDesde(inicioNueva);
         asignacion.setFechaHasta(fechaHasta);
         asignacion.setEsTemporal(esTemporal != null ? esTemporal : false);
         asignacion.setActivo(true);
         em.persist(asignacion);
         em.flush();
+
+        String valorNuevo = horarioModel.getNombreTurno() + " (" + horarioModel.getHoraEntrada()
+                + "-" + horarioModel.getHoraSalida() + "), vigente desde " + inicioNueva
+                + (fechaHasta != null ? " hasta " + fechaHasta : "");
+
+        auditoriaEmpleadoService.registrar(
+                idEmpleado,
+                "ASIGNACION_HORARIO",
+                "ASIGNACION_HORARIO",
+                valorAnterior,
+                valorNuevo
+        );
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("idAsignacion", asignacion.getIdAsignacion());
@@ -91,10 +115,31 @@ public class HorarioService {
         result.put("nombreTurno",  horarioModel.getNombreTurno());
         result.put("horaEntrada",  horarioModel.getHoraEntrada().toString());
         result.put("horaSalida",   horarioModel.getHoraSalida().toString());
-        result.put("fechaDesde",   asignacion.getFechaDesde().toString());
+        result.put("fechaDesde",   inicioNueva.toString());
         result.put("fechaHasta",   fechaHasta != null ? fechaHasta.toString() : null);
         result.put("esTemporal",   asignacion.getEsTemporal());
         return result;
+    }
+
+    private Optional<AsignacionHorarioModel> buscarTurnoActivo(Long idEmpleado) {
+        return em.createQuery(
+                "SELECT a FROM AsignacionHorarioModel a " +
+                "WHERE a.empleado.idEmpleado = :idEmp AND a.activo = true " +
+                "ORDER BY a.fechaDesde DESC", AsignacionHorarioModel.class)
+                .setParameter("idEmp", idEmpleado)
+                .setMaxResults(1)
+                .getResultList()
+                .stream().findFirst();
+    }
+
+    @Transactional
+    public void cerrarAsignacionesActivas(Long idEmpleado, LocalDate fechaCierre) {
+        em.createQuery(
+                "UPDATE AsignacionHorarioModel a SET a.activo = false, a.fechaHasta = :cierre " +
+                "WHERE a.empleado.idEmpleado = :idEmp AND a.activo = true")
+                .setParameter("idEmp", idEmpleado)
+                .setParameter("cierre", fechaCierre)
+                .executeUpdate();
     }
 
     /** Historial de asignaciones de un empleado (más reciente primero). */

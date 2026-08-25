@@ -9,4 +9,7 @@ import java.util.List;
 public interface JpaHistorialRepository extends JpaRepository<HistorialAuditoriaModel, Long> {
     List<HistorialAuditoriaModel> findByIdRegistroAfectadoAndTablaAfectada(
         Long idRegistroAfectado, String tablaAfectada, Sort sort);
+
+    List<HistorialAuditoriaModel> findByIdRegistroAfectadoAndTablaAfectadaIn(
+        Long idRegistroAfectado, List<String> tablasAfectadas, Sort sort);
 }

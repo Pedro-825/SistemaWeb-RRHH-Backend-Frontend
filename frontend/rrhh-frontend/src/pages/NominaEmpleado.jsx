@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import Sidebar from "../components/Sidebar";
-import logo from "../assets/logo.png";
+import Spinner from "../components/Spinner";
+import ApiAlert from "../components/ApiAlert";
 import "../styles/Dashboard.css";
-import { getNominasPorEmpleado, getIdEmpleado } from "../services/api";
-import { abrirComprobante } from "../services/comprobanteHtml";
+import { getNominasPorEmpleado, getIdEmpleado, descargarComprobante } from "../services/api";
 
 const getBonif = (n) =>
   (Number(n.bonifFamiliar)      || 0) +
@@ -21,32 +21,44 @@ export default function NominaEmpleado() {
   const [nominas,  setNominas]  = useState([]);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState("");
-  const [mensaje,  setMensaje]  = useState("");
-  useEffect(() => {
-    if (idEmpleado) cargarNominas();
-    else setError("No se pudo obtener tu ID de empleado. Contacta a RRHH.");
-  }, [idEmpleado]);
 
-  const cargarNominas = async () => {
+  async function cargarNominas() {
     setLoading(true);
     setError("");
     try {
       const data = await getNominasPorEmpleado(idEmpleado);
       setNominas(Array.isArray(data) ? data : []);
-    } catch {
-      setError("No se pudo cargar tu historial de nómina.");
+    } catch (err) {
+      setError(err || "No se pudo cargar tu historial de nómina.");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const handleDescargar = (idNomina) => {
-    const n = nominas.find(x => String(x.idNomina ?? x.id) === String(idNomina));
-    if (n) {
-      const logoUrl = window.location.origin + logo;
-      abrirComprobante(n, logoUrl, "#0891b2", undefined, "Sistema de Recursos Humanos — Boleta de Pago");
-    } else {
-      setError("No se encontró la nómina. Recargue la página e intente de nuevo.");
+  useEffect(() => {
+    if (idEmpleado) cargarNominas();
+    else setError("No se pudo obtener tu ID de empleado. Contacta a RRHH.");
+  }, [idEmpleado]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [descargando, setDescargando] = useState(null);
+
+  const handleDescargar = async (idNomina, periodo) => {
+    setDescargando(idNomina);
+    setError("");
+    try {
+      const blob = await descargarComprobante(idNomina);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Comprobante_Nomina_${periodo ?? idNomina}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err || "No se pudo descargar el comprobante. Intente de nuevo.");
+    } finally {
+      setDescargando(null);
     }
   };
 
@@ -76,19 +88,18 @@ export default function NominaEmpleado() {
           <span className="role-pill role-pill-empleado">Empleado</span>
         </header>
 
-        {mensaje && <div className="alert alert-success">✅ {mensaje}</div>}
-        {error   && <div className="alert alert-warning">⚠️ {error}</div>}
+        <ApiAlert type="error" message={error} />
 
         <div className="section-card" style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ padding: "16px 20px 12px", borderBottom: "1px solid var(--border)" }}>
             <h2 style={{ margin: 0 }}>Historial de Pagos</h2>
           </div>
 
-          <div className="table-wrapper" style={{ marginBottom: 0 }}>
+          <div className="table-wrapper nomina-empleado-table-wrap" style={{ marginBottom: 0 }}>
             {loading ? (
-              <div className="loading-text">Cargando tu historial de nómina...</div>
+              <Spinner />
             ) : (
-              <table>
+              <table className="table-cards nomina-empleado-table">
                 <thead>
                   <tr>
                     <th>#</th>
@@ -112,29 +123,29 @@ export default function NominaEmpleado() {
                     </tr>
                   ) : nominas.map((n, i) => (
                     <tr key={n.idNomina ?? i}>
-                      <td style={{ color: "var(--text-3)", fontSize: "13px" }}>{n.idNomina ?? i + 1}</td>
-                      <td style={{ fontWeight: 600 }}>
+                      <td style={{ color: "var(--text-3)", fontSize: "13px" }}>{i + 1}</td>
+                      <td data-label="Período" style={{ fontWeight: 600 }}>
                         {n.mes && n.anio
                           ? fmtPeriodo(n.mes, n.anio)
                           : n.periodo ?? "—"}
                       </td>
-                      <td>{fmtS(n.sueldoBase ?? n.sueldo)}</td>
-                      <td style={{ color: "var(--success)" }}>
+                      <td data-label="Sueldo Base">{fmtS(n.sueldoBase ?? n.sueldo)}</td>
+                      <td data-label="Bonificaciones" style={{ color: "var(--success)" }}>
                         {fmtS(getBonif(n))}
                       </td>
-                      <td style={{ color: "#ef4444" }}>
+                      <td data-label="Descuentos" style={{ color: "#ef4444" }}>
                         {fmtS(getDesc(n))}
                       </td>
-                      <td style={{ fontWeight: 700, color: "#0f172a" }}>
+                      <td data-label="Sueldo Neto" style={{ fontWeight: 700, color: "#0f172a" }}>
                         {fmtS(n.sueldoNeto)}
                       </td>
-                      <td>
+                      <td data-label="Comprobante">
                         <button
                           className="btn btn-secondary btn-sm"
-                          onClick={() => handleDescargar(n.idNomina)}
-                          disabled={!n.idNomina}
+                          onClick={() => handleDescargar(n.idNomina, n.periodo)}
+                          disabled={!n.idNomina || descargando === n.idNomina}
                         >
-                          ⬇ PDF
+                          {descargando === n.idNomina ? "..." : "⬇ PDF"}
                         </button>
                       </td>
                     </tr>
@@ -146,7 +157,7 @@ export default function NominaEmpleado() {
 
           {nominas.length > 0 && (
             <div className="table-footer-bar">
-              <span>ℹ️ Haga clic en ⬇ PDF para descargar el comprobante de cada período.</span>
+              <span>ℹ️ Haga clic en ⬇ PDF para descargar el comprobante de nómina en formato PDF.</span>
             </div>
           )}
         </div>

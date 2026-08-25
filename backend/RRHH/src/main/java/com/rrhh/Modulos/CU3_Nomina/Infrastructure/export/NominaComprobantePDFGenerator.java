@@ -147,8 +147,6 @@ public class NominaComprobantePDFGenerator {
                 "", null, false, true);
         addSalaryRow(t, "Bonif. Riesgo", n.getBonifRiesgo(), false,
                 "", null, false, false);
-        addSalaryRow(t, "Bonif. Cargo", n.getBonifCargo(), false,
-                "", null, false, true);
 
         // Fila total
         addTotalRow(t, "TOTAL BRUTO", n.getSueldoBruto(),

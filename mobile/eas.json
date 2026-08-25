@@ -1,0 +1,27 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://rrhh-san-gabriel-api-hahbaubnauakctgs.spaincentral-01.azurewebsites.net"
+      },
+      "android": {
+        "image": "sdk-56",
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://rrhh-san-gabriel-api-hahbaubnauakctgs.spaincentral-01.azurewebsites.net"
+      },
+      "android": {
+        "image": "sdk-56",
+        "buildType": "app-bundle"
+      }
+    }
+  }
+}

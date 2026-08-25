@@ -1,7 +1,5 @@
 package com.rrhh.Modulos.CU2_GestionEmpleados.Application.services;
 
-import com.rrhh.Modulos.CU1_AutenticacionYRol.Application.services.RolAsignacionService;
-
 import com.rrhh.Modulos.CU2_GestionEmpleados.Application.dto.EmpleadoResponseDTO;
 import com.rrhh.Modulos.CU2_GestionEmpleados.Application.dto.RegistrarEmpleadoRequestDTO;
 
@@ -44,8 +42,6 @@ public class RegistrarEmpleadoUseCase {
 
     private final NombreUsuarioService nombreUsuarioService;
 
-    private final RolAsignacionService rolAsignacionService;
-
     private final HashService hashService;
 
     private final AuditoriaEmpleadoService auditoriaEmpleadoService;
@@ -54,14 +50,13 @@ public class RegistrarEmpleadoUseCase {
 
     private final HorarioService horarioService;
 
-    public RegistrarEmpleadoUseCase(IEmpleadoRepository empleadoRepository, IContratoRepository contratoRepository, IDepartamentoRepository departamentoRepository, IRolRepository rolRepository, IUsuarioGestionRepository usuarioRepository, NombreUsuarioService nombreUsuarioService, RolAsignacionService rolAsignacionService, HashService hashService, AuditoriaEmpleadoService auditoriaEmpleadoService, IContratoFactory contratoFactory, HorarioService horarioService) {
+    public RegistrarEmpleadoUseCase(IEmpleadoRepository empleadoRepository, IContratoRepository contratoRepository, IDepartamentoRepository departamentoRepository, IRolRepository rolRepository, IUsuarioGestionRepository usuarioRepository, NombreUsuarioService nombreUsuarioService, HashService hashService, AuditoriaEmpleadoService auditoriaEmpleadoService, IContratoFactory contratoFactory, HorarioService horarioService) {
         this.empleadoRepository = empleadoRepository;
         this.contratoRepository = contratoRepository;
         this.departamentoRepository = departamentoRepository;
         this.rolRepository = rolRepository;
         this.usuarioRepository = usuarioRepository;
         this.nombreUsuarioService = nombreUsuarioService;
-        this.rolAsignacionService = rolAsignacionService;
         this.hashService = hashService;
         this.auditoriaEmpleadoService = auditoriaEmpleadoService;
         this.contratoFactory = contratoFactory;
@@ -75,6 +70,22 @@ public class RegistrarEmpleadoUseCase {
             return new EmpleadoResponseDTO(
                     false,
                     "Ya existe un empleado con ese documento de identidad",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+            );
+        }
+
+        if (dto.getCorreo() != null && !dto.getCorreo().isBlank()
+                && empleadoRepository.existsByCorreo(dto.getCorreo())) {
+            return new EmpleadoResponseDTO(
+                    false,
+                    "Ya existe un empleado registrado con ese correo",
                     null,
                     null,
                     null,
@@ -131,17 +142,11 @@ public class RegistrarEmpleadoUseCase {
 
         contratoRepository.save(contrato);
 
-        String nombreRol =
-                rolAsignacionService.determinarRol(
-                        departamento.getNombre(),
-                        dto.getCargo()
-                );
-
         Rol rol =
-                rolRepository.findByNombreRol(nombreRol);
+                rolRepository.findByNombreRol(dto.getRol());
 
         if (rol == null) {
-            throw new RuntimeException("Rol no encontrado: " + nombreRol);
+            throw new RuntimeException("Rol no encontrado: " + dto.getRol());
         }
 
         String nombreUsuarioGenerado =

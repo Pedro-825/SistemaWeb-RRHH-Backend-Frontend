@@ -14,6 +14,7 @@ public class NominaResponseDTO {
     private String nombreEmpleado;
     private Long idEmpleado;
 
+    private BigDecimal sueldoContrato;
     private BigDecimal sueldoBase;
     private BigDecimal totalHorasTrabajadas;
     private BigDecimal totalHorasExtra;
@@ -63,6 +64,9 @@ public class NominaResponseDTO {
 
     public Long getIdEmpleado() { return idEmpleado; }
     public void setIdEmpleado(Long idEmpleado) { this.idEmpleado = idEmpleado; }
+
+    public BigDecimal getSueldoContrato() { return sueldoContrato; }
+    public void setSueldoContrato(BigDecimal sueldoContrato) { this.sueldoContrato = sueldoContrato; }
 
     public BigDecimal getSueldoBase() { return sueldoBase; }
     public void setSueldoBase(BigDecimal sueldoBase) { this.sueldoBase = sueldoBase; }
@@ -126,4 +130,14 @@ public class NominaResponseDTO {
 
     public List<DetalleNominaResponseDTO> getDetalles() { return detalles; }
     public void setDetalles(List<DetalleNominaResponseDTO> detalles) { this.detalles = detalles; }
+
+    // Flags de elegibilidad — indican si la bonificación aplica al empleado (no solo si cobró algo)
+    private Boolean esEmpleadoClinico;
+    private Boolean tieneHorarioNocturno;
+
+    public Boolean getEsEmpleadoClinico() { return esEmpleadoClinico; }
+    public void setEsEmpleadoClinico(Boolean esEmpleadoClinico) { this.esEmpleadoClinico = esEmpleadoClinico; }
+
+    public Boolean getTieneHorarioNocturno() { return tieneHorarioNocturno; }
+    public void setTieneHorarioNocturno(Boolean tieneHorarioNocturno) { this.tieneHorarioNocturno = tieneHorarioNocturno; }
 }

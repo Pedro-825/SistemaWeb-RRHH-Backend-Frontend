@@ -20,6 +20,9 @@ public class BuscarEmpleadoResponseDTO {
     private String correoInstitucional;
     private BigDecimal sueldo;
     private LocalDate fechaInicio;
+    private String tipoContrato;
+    private Integer idDpto;
+    private String direccion;
 
     public BuscarEmpleadoResponseDTO() {
     }
@@ -38,7 +41,10 @@ public class BuscarEmpleadoResponseDTO {
             String nombreUsuario,
             String correoInstitucional,
             BigDecimal sueldo,
-            LocalDate fechaInicio
+            LocalDate fechaInicio,
+            String tipoContrato,
+            Integer idDpto,
+            String direccion
     ) {
         this.idEmpleado = idEmpleado;
         this.nombres = nombres;
@@ -54,6 +60,9 @@ public class BuscarEmpleadoResponseDTO {
         this.correoInstitucional = correoInstitucional;
         this.sueldo = sueldo;
         this.fechaInicio = fechaInicio;
+        this.tipoContrato = tipoContrato;
+        this.idDpto = idDpto;
+        this.direccion = direccion;
     }
 
     public Long getIdEmpleado() {
@@ -167,4 +176,13 @@ public class BuscarEmpleadoResponseDTO {
     public void setFechaInicio(java.time.LocalDate fechaInicio) {
         this.fechaInicio = fechaInicio;
     }
+
+    public String getTipoContrato() { return tipoContrato; }
+    public void setTipoContrato(String tipoContrato) { this.tipoContrato = tipoContrato; }
+
+    public Integer getIdDpto() { return idDpto; }
+    public void setIdDpto(Integer idDpto) { this.idDpto = idDpto; }
+
+    public String getDireccion() { return direccion; }
+    public void setDireccion(String direccion) { this.direccion = direccion; }
 }

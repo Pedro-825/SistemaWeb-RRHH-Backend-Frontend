@@ -1,5 +1,6 @@
 package com.rrhh.config.security;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -26,6 +27,9 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+
+    @Value("${app.frontend-url:http://localhost:5173}")
+    private String frontendUrl;
 
     public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
         this.jwtAuthFilter = jwtAuthFilter;
@@ -56,7 +60,12 @@ public class SecurityConfig {
                                 "/api/v1/auth/verify-2fa",
                                 "/api/v1/auth/recovery",
                                 "/api/v1/auth/reset-password",
-                                "/uploads/**"
+                                "/uploads/**",
+                                // App móvil: autenticación propia por device_token
+                                "/api/dispositivos/**",
+                                "/api/v1/asistencia/biometrico",
+                                "/api/v1/asistencia/biometrico/estado/**",
+                                "/api/v1/galeria/mobile/subir"
                         ).permitAll()
 
                         // =========================
@@ -79,6 +88,7 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of(
+                frontendUrl,
                 "http://localhost:5173",
                 "http://localhost:4200",
                 "http://localhost:80",

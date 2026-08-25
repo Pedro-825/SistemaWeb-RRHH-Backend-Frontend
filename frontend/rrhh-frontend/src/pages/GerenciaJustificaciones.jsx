@@ -1,11 +1,13 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import Sidebar from "../components/Sidebar";
+import Spinner from "../components/Spinner";
+import ApiAlert from "../components/ApiAlert";
 import "../styles/Dashboard.css";
-import { listarJustificacionesPendientes } from "../services/api";
+import { listarTodasJustificaciones } from "../services/api";
 
 const estadoBadge = (estado) => {
-  if (estado === "APROBADO")  return "badge-sol-aprobada";
-  if (estado === "RECHAZADO") return "badge-sol-rechazada";
+  if (estado === "APROBADA")  return "badge-sol-aprobada";
+  if (estado === "RECHAZADA") return "badge-sol-rechazada";
   return "badge-sol-pendiente";
 };
 
@@ -16,21 +18,21 @@ export default function GerenciaJustificaciones() {
 
   useEffect(() => { cargar(); }, []);
 
-  const cargar = async () => {
+  async function cargar() {
     setLoading(true); setError("");
     try {
-      const data = await listarJustificacionesPendientes();
+      const data = await listarTodasJustificaciones();
       setJustificaciones(Array.isArray(data) ? data : []);
-    } catch {
-      setError("No se pudieron cargar las justificaciones de tardanza.");
+    } catch (err) {
+      setError(err || "No se pudieron cargar las justificaciones de tardanza.");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   const pendientes = justificaciones.filter(j => (j.estado ?? "PENDIENTE") === "PENDIENTE").length;
-  const aprobadas  = justificaciones.filter(j => j.estado === "APROBADO").length;
-  const rechazadas = justificaciones.filter(j => j.estado === "RECHAZADO").length;
+  const aprobadas  = justificaciones.filter(j => j.estado === "APROBADA").length;
+  const rechazadas = justificaciones.filter(j => j.estado === "RECHAZADA").length;
 
   return (
     <div className="dashboard">
@@ -53,7 +55,7 @@ export default function GerenciaJustificaciones() {
           </div>
         </header>
 
-        {error && <div className="alert alert-warning">⚠️ {error}</div>}
+        <ApiAlert type="error" message={error} />
 
         {/* Estadísticas */}
         <div className="emp-stats-grid" style={{ marginBottom: 24 }}>
@@ -86,9 +88,9 @@ export default function GerenciaJustificaciones() {
           </div>
           <div className="table-wrapper" style={{ marginBottom: 0 }}>
             {loading ? (
-              <div className="loading-text">Cargando justificaciones...</div>
+              <Spinner />
             ) : (
-              <table>
+              <table className="table-cards">
                 <thead>
                   <tr>
                     <th>#</th>
@@ -115,23 +117,23 @@ export default function GerenciaJustificaciones() {
                       <td style={{ color: "var(--text-3)", fontSize: 13 }}>
                         {j.idJustificacion ?? j.id ?? i + 1}
                       </td>
-                      <td>
-                        <strong>{j.nombreEmpleado ?? j.empleado ?? `Emp. #${j.idEmpleado}`}</strong>
+                      <td data-label="Empleado">
+                        <strong>{j.nombreEmpleado ?? `Emp. #${j.idEmpleado}`}</strong>
                       </td>
-                      <td>{j.fechaIncidencia ?? j.fecha ?? "—"}</td>
-                      <td style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <td data-label="Fecha">{j.fechaAsistencia ?? "—"}</td>
+                      <td data-label="Motivo" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {j.motivo ?? "—"}
                       </td>
-                      <td>
+                      <td data-label="Estado">
                         <span className={`badge ${estadoBadge(j.estado ?? "PENDIENTE")}`}>
                           {j.estado ?? "PENDIENTE"}
                         </span>
                       </td>
-                      <td style={{ color: "var(--text-3)", fontSize: 12 }}>
-                        {j.fechaRegistro ?? j.createdAt ?? "—"}
+                      <td data-label="Registrado" style={{ color: "var(--text-3)", fontSize: 12 }}>
+                        {j.fechaJustificacion ? String(j.fechaJustificacion).slice(0, 16).replace("T", " ") : "—"}
                       </td>
-                      <td style={{ fontSize: 12, color: "var(--text-2)" }}>
-                        {j.comentarioRrhh ?? j.comentario ?? <span style={{ color: "var(--text-3)" }}>—</span>}
+                      <td data-label="Comentario" style={{ fontSize: 12, color: "var(--text-2)" }}>
+                        {j.comentarioRevision ?? <span style={{ color: "var(--text-3)" }}>—</span>}
                       </td>
                     </tr>
                   ))}

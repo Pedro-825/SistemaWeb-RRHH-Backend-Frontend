@@ -290,11 +290,23 @@ body { background: #f0f4f8; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 26px;
+  color: #2563eb;
   margin: 0 auto 18px;
 }
 
 /* ── INPUT CON ICONO PREFIJO ── */
+.login-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  fill: currentColor;
+}
+
+.login-avatar .login-icon {
+  width: 28px;
+  height: 28px;
+}
+
 .lf-wrap {
   position: relative;
   display: flex;
@@ -309,7 +321,11 @@ body { background: #f0f4f8; }
 .lf-prefix {
   position: absolute;
   left: 11px;
-  font-size: 15px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
   color: #94a3b8;
 }
@@ -363,4 +379,9 @@ body { background: #f0f4f8; }
   .login-left { display: none; }
   .login-right { padding: 36px 28px; }
   .login-card { max-width: 420px; }
+}
+
+@media (max-width: 400px) {
+  .login-right { padding: 24px 16px; }
+  .login-modal-box { padding: 24px 18px; }
 }

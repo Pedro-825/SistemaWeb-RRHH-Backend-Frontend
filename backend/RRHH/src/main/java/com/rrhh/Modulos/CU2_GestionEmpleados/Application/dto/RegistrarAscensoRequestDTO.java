@@ -5,6 +5,7 @@ import java.time.LocalDate;
 public class RegistrarAscensoRequestDTO {
 
     private String nuevoCargo;
+    private String nuevoRol;
     private Integer nuevoIdDpto;
     private LocalDate fechaAscenso;
     private String motivo;
@@ -30,6 +31,14 @@ public class RegistrarAscensoRequestDTO {
 
     public void setNuevoCargo(String nuevoCargo) {
         this.nuevoCargo = nuevoCargo;
+    }
+
+    public String getNuevoRol() {
+        return nuevoRol;
+    }
+
+    public void setNuevoRol(String nuevoRol) {
+        this.nuevoRol = nuevoRol;
     }
 
     public Integer getNuevoIdDpto() {

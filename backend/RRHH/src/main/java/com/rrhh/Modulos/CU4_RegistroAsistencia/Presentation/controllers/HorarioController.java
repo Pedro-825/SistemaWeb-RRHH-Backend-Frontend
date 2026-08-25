@@ -13,7 +13,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/horarios")
-@CrossOrigin(origins = "*")
 @PreAuthorize("hasRole('RRHH')")
 public class HorarioController {
 

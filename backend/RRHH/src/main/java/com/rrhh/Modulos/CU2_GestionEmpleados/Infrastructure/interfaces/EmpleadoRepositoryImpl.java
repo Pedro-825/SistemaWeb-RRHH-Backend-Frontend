@@ -48,6 +48,11 @@ public class EmpleadoRepositoryImpl implements IEmpleadoRepository {
     }
 
     @Override
+    public boolean existsByCorreo(String correo) {
+        return jpaRepository.existsByCorreoIgnoreCase(correo);
+    }
+
+    @Override
     public List<Empleado> findAll() {
 
         List<EmpleadoModel> models =

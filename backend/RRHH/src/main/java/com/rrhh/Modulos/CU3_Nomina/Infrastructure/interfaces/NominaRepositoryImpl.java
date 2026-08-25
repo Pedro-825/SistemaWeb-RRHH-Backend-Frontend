@@ -87,6 +87,20 @@ public class NominaRepositoryImpl implements INominaRepository {
             .collect(Collectors.toList());
     }
 
+    @Override
+    public void eliminar(Integer idNomina) {
+        jpaNominaRepository.deleteNotificacionesByNominaId(idNomina);
+        jpaDetalleNominaRepository.deleteByNominaIdNomina(idNomina);
+        jpaNominaRepository.deleteById(Objects.requireNonNull(idNomina));
+    }
+
+    @Override
+    public void eliminarPorPeriodo(String periodo) {
+        jpaNominaRepository.deleteNotificacionesByPeriodo(periodo);
+        jpaNominaRepository.deleteDetallesByPeriodo(periodo);
+        jpaNominaRepository.deleteByPeriodo(periodo);
+    }
+
     private NominaModel mapearAModel(Nomina nomina) {
         NominaModel model = new NominaModel();
         model.setIdNomina(nomina.getIdNomina());
@@ -94,6 +108,7 @@ public class NominaRepositoryImpl implements INominaRepository {
         model.setFechaInicio(nomina.getFechaInicio());
         model.setFechaFin(nomina.getFechaFin());
         model.setFechaEmision(nomina.getFechaEmision() != null ? nomina.getFechaEmision() : LocalDate.now());
+        model.setSueldoContrato(nomina.getSueldoContrato());
         model.setSueldoBase(nomina.getSueldoBase());
         model.setTotalHorasTrabajadas(nomina.getTotalHorasTrabajadas());
         model.setTotalHorasExtra(nomina.getTotalHorasExtra());
@@ -116,6 +131,8 @@ public class NominaRepositoryImpl implements INominaRepository {
         model.setCantidadGuardias(nomina.getCantidadGuardias() != null ? nomina.getCantidadGuardias() : 0);
         model.setTotalHorasNocturnas(nomina.getTotalHorasNocturnas() != null ? nomina.getTotalHorasNocturnas() : java.math.BigDecimal.ZERO);
         model.setTipoPensionAplicada(nomina.getTipoPensionAplicada() != null ? nomina.getTipoPensionAplicada() : "ONP");
+        model.setEsEmpleadoClinico(nomina.getEsEmpleadoClinico() != null ? nomina.getEsEmpleadoClinico() : false);
+        model.setTieneHorarioNocturno(nomina.getTieneHorarioNocturno() != null ? nomina.getTieneHorarioNocturno() : false);
 
         EmpleadoModel emp = new EmpleadoModel();
         emp.setIdEmpleado(nomina.getIdEmpleado());
@@ -137,6 +154,7 @@ public class NominaRepositoryImpl implements INominaRepository {
         nomina.setFechaInicio(model.getFechaInicio());
         nomina.setFechaFin(model.getFechaFin());
         nomina.setFechaEmision(model.getFechaEmision());
+        nomina.setSueldoContrato(model.getSueldoContrato());
         nomina.setSueldoBase(model.getSueldoBase());
         nomina.setTotalHorasTrabajadas(model.getTotalHorasTrabajadas());
         nomina.setTotalHorasExtra(model.getTotalHorasExtra());
@@ -159,6 +177,8 @@ public class NominaRepositoryImpl implements INominaRepository {
         nomina.setCantidadGuardias(model.getCantidadGuardias());
         nomina.setTotalHorasNocturnas(model.getTotalHorasNocturnas());
         nomina.setTipoPensionAplicada(model.getTipoPensionAplicada());
+        nomina.setEsEmpleadoClinico(model.getEsEmpleadoClinico() != null ? model.getEsEmpleadoClinico() : false);
+        nomina.setTieneHorarioNocturno(model.getTieneHorarioNocturno() != null ? model.getTieneHorarioNocturno() : false);
         if (model.getEmpleado() != null) {
             nomina.setIdEmpleado(model.getEmpleado().getIdEmpleado());
         }

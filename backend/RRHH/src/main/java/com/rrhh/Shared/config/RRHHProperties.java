@@ -16,6 +16,7 @@ public class RRHHProperties {
     private int umbralHorasDobles;
 
     private BigDecimal bonifFamiliar;
+    private BigDecimal rmv;
 
     private BigDecimal bonifNocturno;
 
@@ -68,6 +69,9 @@ public class RRHHProperties {
     public void setBonifFamiliar(BigDecimal bonifFamiliar) {
         this.bonifFamiliar = bonifFamiliar;
     }
+
+    public BigDecimal getRmv() { return rmv; }
+    public void setRmv(BigDecimal rmv) { this.rmv = rmv; }
 
     public BigDecimal getBonifNocturno() {
         return bonifNocturno;

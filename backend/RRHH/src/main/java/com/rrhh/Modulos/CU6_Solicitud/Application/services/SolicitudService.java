@@ -2,6 +2,8 @@ package com.rrhh.Modulos.CU6_Solicitud.Application.services;
 
 import com.rrhh.Shared.persistence.EmpleadoModel;
 import com.rrhh.Shared.persistence.HistorialAuditoriaModel;
+import com.rrhh.Shared.persistence.UsuarioModel;
+import com.rrhh.Modulos.CU1_AutenticacionYRol.Infrastructure.interfaces.JpaUsuarioRepository;
 import com.rrhh.Modulos.CU6_Solicitud.Application.dto.DecisionGerenciaRequestDTO;
 import com.rrhh.Modulos.CU6_Solicitud.Application.dto.RegistrarSolicitudRequestDTO;
 import com.rrhh.Modulos.CU6_Solicitud.Application.dto.RevisionRrhhRequestDTO;
@@ -14,7 +16,6 @@ import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -32,19 +33,22 @@ public class SolicitudService implements ISolicitudService {
     private final ISolicitudRepository solicitudRepository;
     private final ISolicitudFactory solicitudFactory;
     private final com.rrhh.Modulos.CU2_GestionEmpleados.Infrastructure.interfaces.JpaEmpleadoRepository jpaEmpleadoRepository;
+    private final JpaUsuarioRepository jpaUsuarioRepository;
 
     public SolicitudService(
             ISolicitudRepository solicitudRepository,
             ISolicitudFactory solicitudFactory,
-            com.rrhh.Modulos.CU2_GestionEmpleados.Infrastructure.interfaces.JpaEmpleadoRepository jpaEmpleadoRepository) {
+            com.rrhh.Modulos.CU2_GestionEmpleados.Infrastructure.interfaces.JpaEmpleadoRepository jpaEmpleadoRepository,
+            JpaUsuarioRepository jpaUsuarioRepository) {
         this.solicitudRepository = solicitudRepository;
         this.solicitudFactory = solicitudFactory;
         this.jpaEmpleadoRepository = jpaEmpleadoRepository;
+        this.jpaUsuarioRepository = jpaUsuarioRepository;
     }
 
     @Override
     @Transactional
-    public SolicitudResponseDTO registrarSolicitud(RegistrarSolicitudRequestDTO request, Long idEmpleado) {
+    public SolicitudResponseDTO registrarSolicitud(RegistrarSolicitudRequestDTO request, Long idUsuario) {
 
         if (request.getFechaInicio().isAfter(request.getFechaFin())) {
             throw new IllegalArgumentException(
@@ -56,8 +60,12 @@ public class SolicitudService implements ISolicitudService {
 
         int diasSolicitados = calcularDiasLaborables(request.getFechaInicio(), request.getFechaFin());
 
-        EmpleadoModel empleado = jpaEmpleadoRepository.findById(Objects.requireNonNull(idEmpleado))
-            .orElseThrow(() -> new IllegalArgumentException("Empleado no encontrado."));
+        UsuarioModel usuario = jpaUsuarioRepository.findById(Objects.requireNonNull(idUsuario))
+            .orElseThrow(() -> new IllegalArgumentException("Usuario no encontrado."));
+        EmpleadoModel empleado = usuario.getEmpleado();
+        if (empleado == null) throw new IllegalArgumentException("El usuario no tiene un empleado vinculado.");
+        Long idEmpleado = empleado.getIdEmpleado();
+
         if (!"ACTIVO".equals(empleado.getEstado())) {
             throw new IllegalStateException("El empleado no esta activo en el sistema.");
         }
@@ -99,6 +107,9 @@ public class SolicitudService implements ISolicitudService {
 
         if (request.isAprobado()) {
             solicitud.setEstado("PROCESADO");
+            if (request.getObservacionRrhh() != null && !request.getObservacionRrhh().isBlank()) {
+                solicitud.setObservacionRrhh(request.getObservacionRrhh());
+            }
         } else {
             if (request.getObservacionRrhh() == null || request.getObservacionRrhh().isBlank()) {
                 throw new IllegalArgumentException("Debe ingresar una observacion para devolver la solicitud.");
@@ -138,7 +149,10 @@ public class SolicitudService implements ISolicitudService {
 
         if (request.isAprobado()) {
             solicitud.setEstado("APROBADA");
-            solicitud.setRespuesta("Su solicitud de vacaciones o permisos ha sido aprobada por Gerencia.");
+            String comentarioGerencia = (request.getRespuesta() != null && !request.getRespuesta().isBlank())
+                ? request.getRespuesta()
+                : "Aprobado por Gerencia.";
+            solicitud.setRespuesta(comentarioGerencia);
 
             // RNF86: Descontar saldo de vacaciones
             if ("VACACIONES".equals(solicitud.getTipoSolicitud())) {
@@ -208,9 +222,15 @@ public class SolicitudService implements ISolicitudService {
 
     @Override
     @Transactional
-    public SolicitudResponseDTO clonarSolicitud(Integer idSolicitud, Long idEmpleado) {
+    public SolicitudResponseDTO clonarSolicitud(Integer idSolicitud, Long idUsuario) {
         Solicitud original = solicitudRepository.buscarPorId(idSolicitud)
             .orElseThrow(() -> new IllegalArgumentException("Solicitud no encontrada."));
+
+        UsuarioModel usuario = jpaUsuarioRepository.findById(Objects.requireNonNull(idUsuario))
+            .orElseThrow(() -> new IllegalArgumentException("Usuario no encontrado."));
+        EmpleadoModel empleado = usuario.getEmpleado();
+        if (empleado == null) throw new IllegalArgumentException("El usuario no tiene un empleado vinculado.");
+        Long idEmpleado = empleado.getIdEmpleado();
 
         Solicitud clon = original.clonePrototype();
 
@@ -227,8 +247,16 @@ public class SolicitudService implements ISolicitudService {
         clon.setActualizadoEl(LocalDateTime.now());
 
         Solicitud guardada = solicitudRepository.guardar(clon);
-        EmpleadoModel empleado = jpaEmpleadoRepository.findById(Objects.requireNonNull(idEmpleado)).orElse(null);
         return mapearAResponse(guardada, empleado);
+    }
+
+    @Override
+    public int obtenerSaldoVacaciones(Long idUsuario) {
+        UsuarioModel usuario = jpaUsuarioRepository.findById(Objects.requireNonNull(idUsuario))
+            .orElseThrow(() -> new IllegalArgumentException("Usuario no encontrado."));
+        EmpleadoModel empleado = usuario.getEmpleado();
+        if (empleado == null) throw new IllegalArgumentException("El usuario no tiene un empleado vinculado.");
+        return empleado.getSaldoVacaciones() != null ? empleado.getSaldoVacaciones() : DIAS_VACACIONES_ANUALES;
     }
 
     public List<SolicitudResponseDTO> listarNotificacionesPorEmpleado(Long idEmpleado) {
@@ -248,15 +276,17 @@ public class SolicitudService implements ISolicitudService {
     // ================================
 
     private void validarDiasLaborables(LocalDate inicio, LocalDate fin) {
+        // En un hospital el personal trabaja todos los días de la semana en turnos rotativos,
+        // por lo que los fines de semana son días laborables válidos para solicitar permiso.
+        // Solo se bloquean los feriados nacionales.
         List<LocalDate> feriados = em.createQuery(
                 "SELECT f.fecha FROM FeriadoModel f", LocalDate.class).getResultList();
 
         LocalDate fecha = inicio;
         while (!fecha.isAfter(fin)) {
-            DayOfWeek dia = fecha.getDayOfWeek();
-            if (dia == DayOfWeek.SATURDAY || dia == DayOfWeek.SUNDAY || feriados.contains(fecha)) {
+            if (feriados.contains(fecha)) {
                 throw new IllegalArgumentException(
-                    "Las fechas seleccionadas incluyen fines de semana o feriados."
+                    "Las fechas seleccionadas incluyen feriados nacionales: " + fecha + "."
                 );
             }
             fecha = fecha.plusDays(1);
@@ -270,8 +300,7 @@ public class SolicitudService implements ISolicitudService {
         int dias = 0;
         LocalDate fecha = inicio;
         while (!fecha.isAfter(fin)) {
-            DayOfWeek dia = fecha.getDayOfWeek();
-            if (dia != DayOfWeek.SATURDAY && dia != DayOfWeek.SUNDAY && !feriados.contains(fecha)) {
+            if (!feriados.contains(fecha)) {
                 dias++;
             }
             fecha = fecha.plusDays(1);

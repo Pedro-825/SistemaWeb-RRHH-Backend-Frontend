@@ -1,0 +1,41 @@
+name: Deploy backend to Azure App Service
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/RRHH/**'
+      - '.github/workflows/deploy-backend-app-service.yml'
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: ${{ vars.AZURE_BACKEND_APP_NAME }}
+  BACKEND_DIR: backend/RRHH
+  JAVA_VERSION: '21'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Build Spring Boot jar
+        working-directory: ${{ env.BACKEND_DIR }}
+        run: mvn -B clean package -DskipTests
+
+      - name: Deploy jar to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_BACKEND_PUBLISH_PROFILE }}
+          package: '${{ env.BACKEND_DIR }}/target/*.jar'

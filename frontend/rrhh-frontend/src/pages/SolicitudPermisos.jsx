@@ -1,6 +1,8 @@
-import { useState, useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+﻿import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import Spinner from "../components/Spinner";
+import ApiAlert from "../components/ApiAlert";
 import "../styles/Dashboard.css";
 import {
   registrarSolicitud,
@@ -9,7 +11,6 @@ import {
   revisarSolicitudRRHH,
   decidirSolicitudGerencia,
   getIdEmpleado,
-  getUser,
 } from "../services/api";
 
 const STEP_COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e"];
@@ -17,11 +18,8 @@ const STEP_COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e"];
 const ESTADO_FLOW_STEP = {
   PENDIENTE:   0,
   OBSERVADO:   0,
-  EN_REVISION: 1,
   PROCESADO:   2,
-  APROBADO:    3,
   APROBADA:    3,
-  RECHAZADO:   3,
   RECHAZADA:   3,
 };
 
@@ -34,7 +32,7 @@ function FlowBar({ estadoSolicitud }) {
     <div className="sol-flow-bar">
       {steps.map((s, i) => {
         const baseColor = STEP_COLORS[i];
-        const color = (hasSelection && i === 3 && estadoSolicitud === "RECHAZADO") ? "#ef4444" : baseColor;
+        const color = (hasSelection && i === 3 && estadoSolicitud === "RECHAZADA") ? "#ef4444" : baseColor;
         const lit = hasSelection && i <= activeUpTo;
         return (
           <div key={s} className="sol-flow-step">
@@ -80,21 +78,18 @@ const ESTADO_TAB_CONFIG = {
 };
 
 const TIPO_LABELS = {
-  VACACIONES: "Vacaciones",
-  PERMISO:    "Permiso",
-  LICENCIA:   "Licencia",
-  OTROS:      "Otros",
+  VACACIONES:       "Vacaciones",
+  PERMISO_PERSONAL: "Permiso Personal",
+  PERMISO_MEDICO:   "Permiso Médico",
+  OTROS:            "Otros",
 };
 
 const estadoBadge = (estado) => {
   const m = {
     PENDIENTE:   "badge-sol-pendiente",
     OBSERVADO:   "badge-sol-pendiente",
-    EN_REVISION: "badge-sol-gerencia",
     PROCESADO:   "badge-sol-gerencia",
-    APROBADO:    "badge-sol-aprobada",
     APROBADA:    "badge-sol-aprobada",
-    RECHAZADO:   "badge-sol-rechazada",
     RECHAZADA:   "badge-sol-rechazada",
   };
   return m[estado] ?? "badge-gray";
@@ -116,17 +111,24 @@ function VistaEmpleado() {
     tipo: "VACACIONES", fechaInicio: "", fechaFin: "", descripcion: "",
   });
 
-  useEffect(() => { if (idEmpleado) cargarMisSolicitudes(); }, [idEmpleado]);
+  useEffect(() => { if (idEmpleado) cargarMisSolicitudes(); }, [idEmpleado]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cargarMisSolicitudes = async () => {
+  async function cargarMisSolicitudes() {
     setLoading(true);
     setError("");
     try {
       const data = await getSolicitudesPorEmpleado(idEmpleado);
-      setSolicitudes(Array.isArray(data) ? data : []);
+      const lista = Array.isArray(data) ? data : [];
+      setSolicitudes(lista);
+      const idsVistas = lista
+        .filter(s => s.estado === "APROBADA" || s.estado === "RECHAZADA")
+        .map(s => s.idSolicitud)
+        .filter(id => id != null);
+      if (idsVistas.length > 0)
+        localStorage.setItem(`notif_vistas_${idEmpleado}`, JSON.stringify(idsVistas));
     } catch { setError("No se pudieron cargar tus solicitudes."); }
     finally  { setLoading(false); }
-  };
+  }
 
   const handleEnviar = async (e) => {
     e.preventDefault();
@@ -142,7 +144,7 @@ function VistaEmpleado() {
       setForm({ tipo: "VACACIONES", fechaInicio: "", fechaFin: "", descripcion: "" });
       setTabActiva("lista");
       cargarMisSolicitudes();
-    } catch { setError("Error al enviar la solicitud. Intente de nuevo."); }
+    } catch (e) { setError(e || "Error al enviar la solicitud. Intente de nuevo."); }
     finally  { setEnviando(false); }
   };
 
@@ -158,8 +160,8 @@ function VistaEmpleado() {
           <span className="role-pill role-pill-empleado">Empleado</span>
         </header>
 
-        {mensaje && <div className="alert alert-success">✅ {mensaje}</div>}
-        {error   && <div className="alert alert-warning">⚠️ {error}</div>}
+        <ApiAlert type="success" message={mensaje} />
+        <ApiAlert type="error" message={error} />
 
         <FlowBar estadoSolicitud={solicitudActiva?.estado} />
 
@@ -178,33 +180,34 @@ function VistaEmpleado() {
           <div className="section-card">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
               <h2 style={{ margin: 0 }}>Mis Solicitudes</h2>
-              <div className="alert alert-info" style={{ margin: 0, padding: "6px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }}>
-                ⏰ ¿Llegaste tarde? Justifica tu tardanza en
-                <a href="/empleado/asistencia" style={{ color: "var(--empleado)", fontWeight: 600, marginLeft: 4 }}>Mi Asistencia →</a>
-              </div>
             </div>
             <div className="table-wrapper">
-              {loading ? <div className="loading-text">Cargando solicitudes...</div> : (
+              {loading ? <Spinner /> : (
                 <table>
                   <thead>
-                    <tr><th>#</th><th>Tipo</th><th>Desde</th><th>Hasta</th><th>Estado</th><th>Observación</th></tr>
+                    <tr><th>#</th><th>Tipo</th><th>Desde</th><th>Hasta</th><th>Estado</th><th>Rev. RRHH</th><th>Decisión Gerencia</th></tr>
                   </thead>
                   <tbody>
                     {solicitudes.length === 0 ? (
-                      <tr><td colSpan={6}><div className="empty-state"><div className="empty-state-icon">📋</div><p>No tienes solicitudes registradas</p></div></td></tr>
-                    ) : solicitudes.map(s => {
-                      const id = s.idSolicitud ?? s.id;
-                      const isSelected = solicitudActiva?.idSolicitud === id || solicitudActiva?.id === id;
+                      <tr><td colSpan={7}><div className="empty-state"><div className="empty-state-icon">📋</div><p>No tienes solicitudes registradas</p></div></td></tr>
+                    ) : solicitudes.map((s, idx) => {
+                      const id = s.idSolicitud;
+                      const isSelected = solicitudActiva?.idSolicitud === id;
                       return (
                         <tr key={id}
                           onClick={() => setSolicitudActiva(isSelected ? null : s)}
                           style={{ cursor: "pointer", background: isSelected ? "#eff6ff" : undefined, outline: isSelected ? "2px solid #3b82f6" : undefined }}>
-                          <td style={{ color: "var(--text-3)", fontSize: "13px" }}>{id}</td>
+                          <td style={{ color: "var(--text-3)", fontSize: "13px" }}>{idx + 1}</td>
                           <td>{TIPO_LABELS[s.tipoSolicitud] ?? s.tipoSolicitud}</td>
                           <td>{s.fechaInicio ?? "—"}</td>
                           <td>{s.fechaFin ?? "—"}</td>
                           <td><span className={`badge ${estadoBadge(s.estado)}`}>{s.estado}</span></td>
-                          <td>{s.observacionRrhh ?? s.comentarioRRHH ?? <span style={{ color: "var(--text-3)" }}>—</span>}</td>
+                          <td style={{ fontSize: 12, color: "var(--text-2)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {s.observacionRrhh ?? s.comentarioRRHH ?? <span style={{ color: "var(--text-3)" }}>—</span>}
+                          </td>
+                          <td style={{ fontSize: 12, color: s.respuesta ? "#16a34a" : "var(--text-3)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {s.respuesta ?? "—"}
+                          </td>
                         </tr>
                       );
                     })}
@@ -223,14 +226,13 @@ function VistaEmpleado() {
                 Las solicitudes pasan por revisión de RRHH y luego Gerencia (según el tipo).
               </div>
               <form onSubmit={handleEnviar}>
-                <div className="form-grid">
+                <div className="form-grid solicitud-form-grid">
                   <div className="form-group">
                     <label>Tipo de Solicitud *</label>
                     <select value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })}>
                       {Object.entries(TIPO_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                   </div>
-                  <div className="form-group" />
                   <div className="form-group">
                     <label>Fecha de Inicio *</label>
                     <input type="date" value={form.fechaInicio}
@@ -250,7 +252,7 @@ function VistaEmpleado() {
                 </div>
                 <div className="form-actions">
                   <button type="submit" className="btn btn-primary" disabled={enviando}>
-                    {enviando ? "Enviando..." : "📤 Enviar Solicitud"}
+                    {enviando ? <><span className="btn-spinner" />Enviando...</> : "📤 Enviar Solicitud"}
                   </button>
                   <button type="button" className="btn btn-secondary"
                     onClick={() => setForm({ tipo: "VACACIONES", fechaInicio: "", fechaFin: "", descripcion: "" })}>
@@ -299,7 +301,7 @@ function VistaRRHH() {
 
   useEffect(() => { cargarSolicitudes(); }, []);
 
-  const cargarSolicitudes = async () => {
+  async function cargarSolicitudes() {
     setLoading(true); setError("");
     try {
       const [pend, enRev, apro, rech] = await Promise.all([
@@ -316,20 +318,22 @@ function VistaRRHH() {
       ]);
     } catch { setError("No se pudieron cargar las solicitudes"); }
     finally  { setLoading(false); }
-  };
+  }
 
   const contarPorEstado = (e) => todasSolicitudes.filter(s => s.estado === e).length;
 
   const handleRevisar = async () => {
-    if (!modalRevision.decision || !modalRevision.comentario.trim()) return;
+    const esDevolver = modalRevision.decision === "DEVOLVER";
+    if (!modalRevision.decision) return;
+    if (esDevolver && !modalRevision.comentario.trim()) return;
     setProcesando(true);
     try {
-      await revisarSolicitudRRHH(modalRevision.solicitud.idSolicitud ?? modalRevision.solicitud.id, {
+      await revisarSolicitudRRHH(modalRevision.solicitud.idSolicitud, {
         decision: modalRevision.decision, comentario: modalRevision.comentario,
       });
-      setMensaje(`Solicitud ${modalRevision.decision === "APROBAR" ? "aprobada" : "devuelta"} correctamente`);
+      setMensaje(`Solicitud ${modalRevision.decision === "APROBAR" ? "enviada a Gerencia" : "devuelta al empleado"} correctamente`);
       setModalRevision({ open: false, solicitud: null, decision: "", comentario: "" });
-      cargarSolicitudes();
+      await cargarSolicitudes();
     } catch {
       setError("Error al procesar la revisión");
       setModalRevision({ open: false, solicitud: null, decision: "", comentario: "" });
@@ -355,8 +359,8 @@ function VistaRRHH() {
           <span className="role-pill role-pill-rrhh">RRHH</span>
         </header>
 
-        {mensaje && <div className="alert alert-success">✅ {mensaje}</div>}
-        {error   && <div className="alert alert-warning">⚠️ {error}</div>}
+        <ApiAlert type="success" message={mensaje} />
+        <ApiAlert type="error" message={error} />
 
         <FlowBar estadoSolicitud={solicitudActiva?.estado} />
 
@@ -400,36 +404,42 @@ function VistaRRHH() {
             </div>
           </div>
           <div className="table-wrapper" style={{ marginBottom: 0 }}>
-            {loading ? <div className="loading-text">Cargando solicitudes...</div> : (
+            {loading ? <Spinner text="Cargando solicitudes..." /> : (
               <table>
                 <thead>
-                  <tr><th>#</th><th>Empleado</th><th>Tipo</th><th>Inicio</th><th>Fin</th><th>Motivo</th><th>Estado</th><th>Acciones</th></tr>
+                  <tr><th>#</th><th>Empleado</th><th>Tipo</th><th>Inicio</th><th>Fin</th><th>Motivo</th><th>Coment. RRHH</th><th>Decisión Gerencia</th><th>Estado</th>{filtroEstado === "PENDIENTE" && <th>Acciones</th>}</tr>
                 </thead>
                 <tbody>
                   {solicitudes.length === 0 ? (
-                    <tr><td colSpan={8}><div className="empty-state"><div className="empty-state-icon">✅</div><p>No hay solicitudes en estado {filtroEstado}</p></div></td></tr>
-                  ) : solicitudes.map(s => {
-                    const id = s.idSolicitud ?? s.id;
-                    const isSelected = solicitudActiva?.idSolicitud === id || solicitudActiva?.id === id;
+                    <tr><td colSpan={filtroEstado === "PENDIENTE" ? 10 : 9}><div className="empty-state"><div className="empty-state-icon">✅</div><p>No hay solicitudes en estado {filtroEstado}</p></div></td></tr>
+                  ) : solicitudes.map((s, idx) => {
+                    const id = s.idSolicitud;
+                    const isSelected = solicitudActiva?.idSolicitud === id;
                     return (
                       <tr key={id}
                         onClick={() => setSolicitudActiva(isSelected ? null : s)}
                         style={{ cursor: "pointer", background: isSelected ? "#eff6ff" : undefined, outline: isSelected ? "2px solid #3b82f6" : undefined }}>
-                        <td style={{ color: "var(--text-3)", fontSize: "13px" }}>{id}</td>
+                        <td style={{ color: "var(--text-3)", fontSize: "13px" }}>{idx + 1}</td>
                         <td>{s.nombreEmpleado ?? s.idEmpleado}</td>
                         <td>{TIPO_LABELS[s.tipoSolicitud] ?? s.tipoSolicitud}</td>
                         <td>{s.fechaInicio ?? "—"}</td>
                         <td>{s.fechaFin ?? "—"}</td>
-                        <td style={{ maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.motivo}</td>
+                        <td style={{ maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.motivo}</td>
+                        <td style={{ fontSize: 12, color: "var(--text-2)", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {s.observacionRrhh ?? <span style={{ color: "var(--text-3)" }}>—</span>}
+                        </td>
+                        <td style={{ fontSize: 12, color: s.respuesta ? "#16a34a" : "var(--text-3)", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {s.respuesta ?? "—"}
+                        </td>
                         <td><span className={`badge ${estadoBadge(s.estado)}`}>{s.estado}</span></td>
-                        <td>
-                          {(s.estado === "PENDIENTE" || s.estado === "OBSERVADO") && (
+                        {filtroEstado === "PENDIENTE" && (
+                          <td>
                             <button className="btn btn-primary btn-sm"
                               onClick={e => { e.stopPropagation(); setModalRevision({ open: true, solicitud: s, decision: "", comentario: "" }); }}>
                               Revisar
                             </button>
-                          )}
-                        </td>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -441,11 +451,11 @@ function VistaRRHH() {
       </main>
 
       {modalRevision.open && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalRevision({ ...modalRevision, open: false })}>
+        <div className="modal-overlay">
           <div className="modal-box">
             <div className="modal-header">
               <div>
-                <h3>📋 Revisar Solicitud #{modalRevision.solicitud?.idSolicitud ?? modalRevision.solicitud?.id}</h3>
+                <h3>📋 Revisar Solicitud #{modalRevision.solicitud?.idSolicitud}</h3>
                 <p>{TIPO_LABELS[modalRevision.solicitud?.tipoSolicitud] ?? modalRevision.solicitud?.tipoSolicitud} — {modalRevision.solicitud?.nombreEmpleado ?? modalRevision.solicitud?.idEmpleado}</p>
               </div>
               <button className="modal-close" onClick={() => setModalRevision({ ...modalRevision, open: false })}>×</button>
@@ -461,16 +471,20 @@ function VistaRRHH() {
                 </select>
               </div>
               <div className="form-group">
-                <label>Comentario *</label>
+                <label>
+                  Comentario {modalRevision.decision === "DEVOLVER" ? "*" : "(opcional)"}
+                </label>
                 <textarea rows={3} value={modalRevision.comentario}
                   onChange={e => setModalRevision({ ...modalRevision, comentario: e.target.value })}
-                  placeholder="Ingrese su observación o motivo de decisión..." />
+                  placeholder={modalRevision.decision === "DEVOLVER"
+                    ? "Indique el motivo por el que devuelve la solicitud..."
+                    : "Observación para Gerencia (opcional)..."} />
               </div>
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setModalRevision({ ...modalRevision, open: false })}>Cancelar</button>
               <button className="btn btn-primary" onClick={handleRevisar}
-                disabled={!modalRevision.decision || !modalRevision.comentario.trim() || procesando}>
+                disabled={!modalRevision.decision || (modalRevision.decision === "DEVOLVER" && !modalRevision.comentario.trim()) || procesando}>
                 {procesando ? "Procesando..." : "Confirmar Revisión"}
               </button>
             </div>
@@ -497,7 +511,7 @@ function VistaGerencia() {
 
   useEffect(() => { cargarSolicitudes(); }, []);
 
-  const cargarSolicitudes = async () => {
+  async function cargarSolicitudes() {
     setLoading(true); setError("");
     try {
       const [enRev, aprob, recha] = await Promise.all([
@@ -510,19 +524,21 @@ function VistaGerencia() {
       setSolRechazadas(Array.isArray(recha) ? recha : []);
     } catch { setError("No se pudieron cargar las solicitudes"); }
     finally  { setLoading(false); }
-  };
+  }
 
   const handleDecidir = async () => {
-    if (!modalDecision.decision || !modalDecision.comentario.trim()) return;
+    const esRechazo = modalDecision.decision === "RECHAZAR";
+    if (!modalDecision.decision) return;
+    if (esRechazo && !modalDecision.comentario.trim()) return;
     setProcesando(true);
     try {
       await decidirSolicitudGerencia(
-        modalDecision.solicitud.idSolicitud ?? modalDecision.solicitud.id,
+        modalDecision.solicitud.idSolicitud,
         { decision: modalDecision.decision, comentario: modalDecision.comentario }
       );
       setMensaje(`Solicitud ${modalDecision.decision === "APROBAR" ? "aprobada" : "rechazada"} correctamente`);
       setModalDecision({ open: false, solicitud: null, decision: "", comentario: "" });
-      cargarSolicitudes();
+      await cargarSolicitudes();
     } catch {
       setError("Error al procesar la decisión");
       setModalDecision({ open: false, solicitud: null, decision: "", comentario: "" });
@@ -545,8 +561,8 @@ function VistaGerencia() {
           </div>
         </header>
 
-        {mensaje && <div className="alert alert-success" style={{ marginTop: 16 }}>✅ {mensaje}</div>}
-        {error   && <div className="alert alert-warning" style={{ marginTop: 16 }}>⚠️ {error}</div>}
+        <ApiAlert type="success" message={mensaje} style={{ marginTop: 16 }} />
+        <ApiAlert type="error" message={error} style={{ marginTop: 16 }} />
 
         <FlowBar estadoSolicitud={solicitudActiva?.estado} />
 
@@ -558,28 +574,28 @@ function VistaGerencia() {
           </h3>
           <div className="section-card" style={{ padding: 0, overflow: "hidden" }}>
             <div className="table-wrapper" style={{ marginBottom: 0 }}>
-              {loading ? <div className="loading-text">Cargando solicitudes...</div> : (
-                <table>
+              {loading ? <Spinner /> : (
+                <table className="table-gerencia-permisos">
                   <thead>
                     <tr><th>#</th><th>Empleado</th><th>Tipo</th><th>Inicio</th><th>Fin</th><th>Motivo</th><th>Rev. RRHH</th><th>Estado</th><th>Decisión</th></tr>
                   </thead>
                   <tbody>
                     {solicitudes.length === 0 ? (
                       <tr><td colSpan={9}><div className="empty-state"><div className="empty-state-icon">✅</div><p>No hay solicitudes pendientes de decisión</p></div></td></tr>
-                    ) : solicitudes.map(s => {
-                      const id = s.idSolicitud ?? s.id;
-                      const isSelected = solicitudActiva?.idSolicitud === id || solicitudActiva?.id === id;
+                    ) : solicitudes.map((s, idx) => {
+                      const id = s.idSolicitud;
+                      const isSelected = solicitudActiva?.idSolicitud === id;
                       return (
                         <tr key={id}
                           onClick={() => setSolicitudActiva(isSelected ? null : s)}
                           style={{ cursor: "pointer", background: isSelected ? "#eff6ff" : undefined, outline: isSelected ? "2px solid #3b82f6" : undefined }}>
-                          <td style={{ color: "var(--text-3)", fontSize: "13px" }}>{id}</td>
+                          <td style={{ color: "var(--text-3)", fontSize: "13px" }}>{idx + 1}</td>
                           <td>{s.nombreEmpleado ?? s.idEmpleado}</td>
                           <td>{TIPO_LABELS[s.tipoSolicitud] ?? s.tipoSolicitud}</td>
                           <td>{s.fechaInicio ?? "—"}</td>
                           <td>{s.fechaFin ?? "—"}</td>
-                          <td style={{ maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.motivo}</td>
-                          <td style={{ fontSize: "12px", color: "var(--text-2)" }}>{s.observacionRrhh ?? "—"}</td>
+                          <td>{s.motivo}</td>
+                          <td>{s.observacionRrhh ?? "—"}</td>
                           <td><span className={`badge ${estadoBadge(s.estado)}`}>{s.estado}</span></td>
                           <td>
                             <div style={{ display: "flex", gap: "4px" }}>
@@ -612,32 +628,32 @@ function VistaGerencia() {
           <div className="section-card" style={{ padding: 0, overflow: "hidden" }}>
             <div className="table-wrapper" style={{ marginBottom: 0 }}>
               {loading ? (
-                <div className="loading-text">Actualizando solicitudes aprobadas...</div>
+                <Spinner text="Cargando solicitudes aprobadas..." />
               ) : solAprobadas.length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-state-icon">📋</div>
                   <p>No hay solicitudes aprobadas todavía</p>
                 </div>
               ) : (
-                <table>
+                <table className="table-gerencia-permisos">
                   <thead>
                     <tr><th>#</th><th>Empleado</th><th>Tipo</th><th>Inicio</th><th>Fin</th><th>Días</th><th>Respuesta Gerencia</th></tr>
                   </thead>
                   <tbody>
-                    {solAprobadas.map(s => {
-                      const id = s.idSolicitud ?? s.id;
-                      const isSelected = solicitudActiva?.idSolicitud === id || solicitudActiva?.id === id;
+                    {solAprobadas.map((s, idx) => {
+                      const id = s.idSolicitud;
+                      const isSelected = solicitudActiva?.idSolicitud === id;
                       return (
                         <tr key={id}
                           onClick={() => setSolicitudActiva(isSelected ? null : s)}
                           style={{ cursor: "pointer", background: isSelected ? "#eff6ff" : undefined, outline: isSelected ? "2px solid #3b82f6" : undefined }}>
-                          <td style={{ color: "var(--text-3)", fontSize: 13 }}>{id}</td>
+                          <td style={{ color: "var(--text-3)", fontSize: 13 }}>{idx + 1}</td>
                           <td>{s.nombreEmpleado ?? s.idEmpleado}</td>
                           <td>{TIPO_LABELS[s.tipoSolicitud] ?? s.tipoSolicitud}</td>
                           <td>{s.fechaInicio ?? "—"}</td>
                           <td>{s.fechaFin ?? "—"}</td>
-                          <td style={{ textAlign: "center" }}>{s.diasSolicitados ?? "—"}</td>
-                          <td style={{ fontSize: 12, color: "#16a34a" }}>{s.respuesta ?? "—"}</td>
+                          <td>{s.diasSolicitados ?? "—"}</td>
+                          <td style={{ color: "#16a34a" }}>{s.respuesta ?? "—"}</td>
                         </tr>
                       );
                     })}
@@ -657,32 +673,32 @@ function VistaGerencia() {
           <div className="section-card" style={{ padding: 0, overflow: "hidden" }}>
             <div className="table-wrapper" style={{ marginBottom: 0 }}>
               {loading ? (
-                <div className="loading-text">Actualizando solicitudes rechazadas...</div>
+                <Spinner text="Cargando solicitudes rechazadas..." />
               ) : solRechazadas.length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-state-icon">📋</div>
                   <p>No hay solicitudes rechazadas</p>
                 </div>
               ) : (
-                <table>
+                <table className="table-gerencia-permisos">
                   <thead>
                     <tr><th>#</th><th>Empleado</th><th>Tipo</th><th>Inicio</th><th>Fin</th><th>Días</th><th>Motivo del Rechazo</th></tr>
                   </thead>
                   <tbody>
-                    {solRechazadas.map(s => {
-                      const id = s.idSolicitud ?? s.id;
-                      const isSelected = solicitudActiva?.idSolicitud === id || solicitudActiva?.id === id;
+                    {solRechazadas.map((s, idx) => {
+                      const id = s.idSolicitud;
+                      const isSelected = solicitudActiva?.idSolicitud === id;
                       return (
                         <tr key={id}
                           onClick={() => setSolicitudActiva(isSelected ? null : s)}
                           style={{ cursor: "pointer", background: isSelected ? "#fff1f2" : undefined, outline: isSelected ? "2px solid #ef4444" : undefined }}>
-                          <td style={{ color: "var(--text-3)", fontSize: 13 }}>{id}</td>
+                          <td style={{ color: "var(--text-3)", fontSize: 13 }}>{idx + 1}</td>
                           <td>{s.nombreEmpleado ?? s.idEmpleado}</td>
                           <td>{TIPO_LABELS[s.tipoSolicitud] ?? s.tipoSolicitud}</td>
                           <td>{s.fechaInicio ?? "—"}</td>
                           <td>{s.fechaFin ?? "—"}</td>
-                          <td style={{ textAlign: "center" }}>{s.diasSolicitados ?? "—"}</td>
-                          <td style={{ fontSize: 12, color: "#dc2626" }}>{s.respuesta ?? "—"}</td>
+                          <td>{s.diasSolicitados ?? "—"}</td>
+                          <td style={{ color: "#dc2626" }}>{s.respuesta ?? "—"}</td>
                         </tr>
                       );
                     })}
@@ -695,21 +711,27 @@ function VistaGerencia() {
       </main>
 
       {modalDecision.open && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalDecision({ ...modalDecision, open: false })}>
+        <div className="modal-overlay">
           <div className="modal-box">
             <div className="modal-header">
               <div>
                 <h3>{modalDecision.decision === "APROBAR" ? "✅ Aprobar" : "❌ Rechazar"} Solicitud</h3>
-                <p>#{modalDecision.solicitud?.idSolicitud ?? modalDecision.solicitud?.id} — {modalDecision.solicitud?.nombreEmpleado ?? modalDecision.solicitud?.idEmpleado}</p>
+                <p>#{modalDecision.solicitud?.idSolicitud} — {modalDecision.solicitud?.nombreEmpleado ?? modalDecision.solicitud?.idEmpleado}</p>
               </div>
               <button className="modal-close" onClick={() => setModalDecision({ ...modalDecision, open: false })}>×</button>
             </div>
             <div className="modal-body">
               <div className="form-group">
-                <label>Observación / Comentario de Gerencia *</label>
+                <label>
+                  {modalDecision.decision === "APROBAR"
+                    ? "Comentario para el empleado (opcional)"
+                    : "Motivo del rechazo *"}
+                </label>
                 <textarea rows={3} value={modalDecision.comentario}
                   onChange={e => setModalDecision({ ...modalDecision, comentario: e.target.value })}
-                  placeholder="Ingrese su decisión y motivo..." autoFocus />
+                  placeholder={modalDecision.decision === "APROBAR"
+                    ? "Mensaje adicional para el empleado (opcional)..."
+                    : "Indique el motivo del rechazo..."} autoFocus />
               </div>
             </div>
             <div className="modal-footer">
@@ -717,7 +739,7 @@ function VistaGerencia() {
               <button
                 className={modalDecision.decision === "APROBAR" ? "btn btn-success" : "btn btn-danger"}
                 onClick={handleDecidir}
-                disabled={!modalDecision.comentario.trim() || procesando}>
+                disabled={(modalDecision.decision === "RECHAZAR" && !modalDecision.comentario.trim()) || procesando}>
                 {procesando ? "Procesando..." : (modalDecision.decision === "APROBAR" ? "✅ Confirmar Aprobación" : "❌ Confirmar Rechazo")}
               </button>
             </div>

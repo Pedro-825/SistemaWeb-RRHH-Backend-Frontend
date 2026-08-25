@@ -27,6 +27,21 @@ public class EmpleadoDerechoHabientesModel {
     @Column(name = "regimen_pension")
     private String regimenPension;
 
+    @Column(name = "afp")
+    private String afp;
+
+    @Column(name = "cuspp")
+    private String cuspp;
+
+    @Column(name = "tipo_comision_afp")
+    private String tipoComisionAfp;
+
+    @Column(name = "vigente_desde")
+    private java.time.LocalDate vigenteDesde;
+
+    @Column(name = "vigente_hasta")
+    private java.time.LocalDate vigenteHasta;
+
     @Column(name = "contacto_emergencia")
     private String contactoEmergencia;
 

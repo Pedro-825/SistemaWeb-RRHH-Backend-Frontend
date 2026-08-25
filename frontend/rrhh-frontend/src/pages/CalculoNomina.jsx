@@ -1,10 +1,13 @@
-import { useState } from "react";
+﻿import { useState, useEffect, useCallback } from "react";
 import Sidebar from "../components/Sidebar";
+import Spinner from "../components/Spinner";
+import ApiAlert from "../components/ApiAlert";
 import "../styles/Dashboard.css";
 import {
   calcularNomina,
   getNominasPorPeriodo,
   enviarComprobante,
+  enviarComprobantesPeriodo,
   descargarComprobante,
   ajustarNomina,
 } from "../services/api";
@@ -13,8 +16,7 @@ const getBonif = (n) =>
   (Number(n.bonifFamiliar)      || 0) +
   (Number(n.bonifTurnoNocturno) || 0) +
   (Number(n.bonifGuardia)       || 0) +
-  (Number(n.bonifRiesgo)        || 0) +
-  (Number(n.bonifCargo)         || 0);
+  (Number(n.bonifRiesgo)        || 0);
 
 const getDesc = (n) =>
   (Number(n.descuentoTardanzas) || 0) +
@@ -36,13 +38,19 @@ export default function CalculoNomina() {
   const [loading, setLoading] = useState(false);
   const [calculando, setCalculando] = useState(false);
   const [resultado, setResultado] = useState(null);
+  const [periodoCalculado, setPeriodoCalculado] = useState(false);
+  const [verificando, setVerificando] = useState(false);
   const [historial, setHistorial] = useState([]);
   const [mensaje,   setMensaje]   = useState("");
   const [error,     setError]     = useState("");
   const [enviando,  setEnviando]  = useState({});
+  const [enviandoTodos, setEnviandoTodos] = useState(false);
+  const [modalConfirmarEnvio, setModalConfirmarEnvio] = useState(false);
+  const [resultadoEnvio, setResultadoEnvio] = useState(null);
   const [guardandoAjuste, setGuardandoAjuste] = useState(false);
   const [previewNomina, setPreviewNomina] = useState(null);
   const [modalEstructura, setModalEstructura] = useState(null);
+  const [selectedEmpleado, setSelectedEmpleado] = useState(null);
   const [datosBase, setDatosBase] = useState({
     sueldoBase: 0, horasTrabajadas: 0, horasExtra: 0,
     horasNocturnas: 0, minutosLate: 0, tieneHijos: false,
@@ -53,9 +61,9 @@ export default function CalculoNomina() {
     setModalEstructura(n);
     setDatosBase({
       sueldoBase:       Number(n.sueldoBase ?? 0),
-      horasTrabajadas:  Number(n.totalHorasTrabajadas ?? 0),
-      horasExtra:       Number(n.totalHorasExtra ?? 0),
-      horasNocturnas:   Number(n.totalHorasNocturnas ?? 0),
+      horasTrabajadas:  Math.round(Number(n.totalHorasTrabajadas ?? 0) * 10) / 10,
+      horasExtra:       Math.round(Number(n.totalHorasExtra ?? 0) * 10) / 10,
+      horasNocturnas:   Math.round(Number(n.totalHorasNocturnas ?? 0) * 10) / 10,
       minutosLate:      n.totalMinutosTardanza ?? 0,
       tieneHijos:       n.tieneHijos ?? (Number(n.cantidadHijos) > 0),
       cantidadHijos:    n.cantidadHijos ?? 0,
@@ -65,6 +73,71 @@ export default function CalculoNomina() {
   };
 
   const periodo = `${anio}-${mes}`;
+  const hoy = new Date();
+
+  const esPeriodoFuturo = (mesSeleccionado = mes, anioSeleccionado = anio) =>
+    Number(anioSeleccionado) > hoy.getFullYear() ||
+    (Number(anioSeleccionado) === hoy.getFullYear() && Number(mesSeleccionado) > hoy.getMonth() + 1);
+
+  // Mes actual seleccionado → cálculo ilimitado (provisional)
+  const esMesActual = Number(mes) === hoy.getMonth() + 1 && Number(anio) === hoy.getFullYear();
+
+  // Mes anterior seleccionado Y hoy es día 1 → ventana de cierre final
+  const fechaPrevia = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+  const esMesPrevioY1ro =
+    Number(mes) === fechaPrevia.getMonth() + 1 &&
+    Number(anio) === fechaPrevia.getFullYear() &&
+    hoy.getDate() === 1;
+
+  // En ventana de recálculo: mes actual O cierre del mes anterior
+  const enVentanaRecalculo = esMesActual || esMesPrevioY1ro;
+
+  // "Calcular" bloqueado si: futuro, O ya calculado y fuera de ventana
+  const calcularBloqueado = esPeriodoFuturo() || (periodoCalculado && !enVentanaRecalculo);
+
+  // "Cargar" bloqueado si aún no hay nómina calculada
+  const cargarBloqueado = !periodoCalculado;
+
+  const cambiarPeriodo = (campo, valor) => {
+    if (campo === "mes") setMes(valor);
+    else setAnio(valor);
+    setResultado(null);
+    setPeriodoCalculado(false);
+    setMensaje("");
+    setError("");
+    setSelectedEmpleado(null);
+  };
+
+  const verificarPeriodo = useCallback(async (m, a) => {
+    if (esPeriodoFuturo(m, a)) return;
+    setVerificando(true);
+    try {
+      const data = await getNominasPorPeriodo(m, a);
+      if (Array.isArray(data) && data.length > 0) {
+        const byEmployee = {};
+        for (const n of data) {
+          if (!byEmployee[n.idEmpleado] || n.idNomina > byEmployee[n.idEmpleado].idNomina)
+            byEmployee[n.idEmpleado] = n;
+        }
+        const deduped = Object.values(byEmployee)
+          .sort((a, b) => (a.idNomina ?? Infinity) - (b.idNomina ?? Infinity));
+        setResultado(deduped);
+        setPeriodoCalculado(true);
+        setMensaje(`Período ${a}-${m} ya calculado — mostrando ${deduped.length} registros.`);
+      } else {
+        setPeriodoCalculado(false);
+        setResultado(null);
+      }
+    } catch {
+      setPeriodoCalculado(false);
+    } finally {
+      setVerificando(false);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    verificarPeriodo(mes, anio);
+  }, [mes, anio]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCalcular = async () => {
     setCalculando(true);
@@ -73,7 +146,7 @@ export default function CalculoNomina() {
     try {
       const data = await calcularNomina(mes, anio);
       if (Array.isArray(data)) {
-        setResultado(data);
+        setResultado([...data].sort((a, b) => (a.idNomina ?? Infinity) - (b.idNomina ?? Infinity)));
         setHistorial(h => {
           const entry = { ...data, periodo, timestamp: new Date().toISOString() };
           return [entry, ...h.filter(x => x.periodo !== periodo)].slice(0, 10);
@@ -82,8 +155,8 @@ export default function CalculoNomina() {
       } else {
         throw new Error(data?.message || "Respuesta inválida");
       }
-    } catch {
-      setError("Error al calcular la nómina. Verifique el período.");
+    } catch (err) {
+      setError(err || "Error al calcular la nómina. Verifique el período.");
     } finally {
       setCalculando(false);
     }
@@ -102,14 +175,15 @@ export default function CalculoNomina() {
             byEmployee[n.idEmpleado] = n;
           }
         }
-        const deduped = Object.values(byEmployee);
+        const deduped = Object.values(byEmployee)
+          .sort((a, b) => (a.idNomina ?? Infinity) - (b.idNomina ?? Infinity));
         setResultado(deduped);
         setMensaje(`Se cargaron ${deduped.length} registros del período ${periodo}`);
       } else {
         setError(`No hay nóminas registradas para ${periodo}. Calcule primero.`);
       }
-    } catch {
-      setError("Error al cargar el período");
+    } catch (err) {
+      setError(err || "Error al cargar el período");
     } finally {
       setLoading(false);
     }
@@ -122,10 +196,31 @@ export default function CalculoNomina() {
     try {
       await enviarComprobante(idNomina);
       setMensaje(`Comprobante enviado correctamente (Nómina #${idNomina})`);
-    } catch {
-      setError("Error al enviar el comprobante");
+    } catch (err) {
+      setError(err || "Error al enviar el comprobante");
     } finally {
       setEnviando(v => ({ ...v, [idNomina]: false }));
+    }
+  };
+
+  const handleEnviarTodos = async () => {
+    setModalConfirmarEnvio(false);
+    setEnviandoTodos(true);
+    setMensaje("");
+    setError("");
+    setResultadoEnvio(null);
+    try {
+      const resp = await enviarComprobantesPeriodo(periodo);
+      setResultadoEnvio(resp);
+      if (resp?.success === false && Number(resp?.fallidos || 0) > 0) {
+        setError(resp.message || "Algunos comprobantes no pudieron enviarse.");
+      } else {
+        setMensaje(resp?.message || `Comprobantes enviados para ${periodo}.`);
+      }
+    } catch (err) {
+      setError(err || "Error al enviar los comprobantes del período.");
+    } finally {
+      setEnviandoTodos(false);
     }
   };
 
@@ -151,6 +246,7 @@ export default function CalculoNomina() {
       return Array.isArray(prev) ? nuevaLista : nuevaLista[0];
     });
     setModalEstructura(actualizada);
+    setSelectedEmpleado(actualizada);
   };
 
   const handleGuardarAjuste = async (calculos) => {
@@ -194,11 +290,13 @@ export default function CalculoNomina() {
   const fmtS = (v) => v != null ? `S/ ${Number(v).toLocaleString("es-PE", { minimumFractionDigits: 2 })}` : "—";
 
   const resultList = resultado
-    ? (Array.isArray(resultado) ? resultado : [resultado])
+    ? (Array.isArray(resultado) ? [...resultado] : [resultado])
+        .sort((a, b) => (a.idNomina ?? Infinity) - (b.idNomina ?? Infinity))
     : [];
 
   const totalNeto  = resultList.reduce((sum, n) => sum + Number(n.sueldoNeto ?? 0), 0);
   const totalBruto = resultList.reduce((sum, n) => sum + Number(n.sueldoBruto ?? n.sueldoBase ?? 0), 0);
+  const cargandoResultados = loading || verificando || calculando;
 
   return (
     <div className="dashboard">
@@ -215,13 +313,68 @@ export default function CalculoNomina() {
           </div>
         </header>
 
-        {mensaje && <div className="alert alert-success">✅ {mensaje}</div>}
-        {error   && <div className="alert alert-warning">⚠️ {error}</div>}
-
         <div className="nomina-layout">
 
           {/* ── COLUMNA IZQUIERDA ── */}
           <div className="nomina-left">
+
+            {selectedEmpleado && (() => {
+              const se = selectedEmpleado;
+              return (
+                <div className="section-card" style={{ padding: 0, overflow: "hidden", marginBottom: 12, cursor: "pointer", border: "2px solid #2563eb" }}
+                  onClick={() => abrirEstructura(se)}>
+                  <div style={{ padding: "14px 18px", background: "linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%)", color: "#fff", display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 8, background: "rgba(255,255,255,0.18)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
+                      ✏️
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700 }}>{se.nombreEmpleado ?? se.empleadoNombre ?? `Empleado #${se.idEmpleado}`}</div>
+                      <div style={{ fontSize: 11, opacity: 0.72, marginTop: 1 }}>Nómina #{se.idNomina} · Haz clic para modificar</div>
+                    </div>
+                    <button onClick={e => { e.stopPropagation(); setSelectedEmpleado(null); }}
+                      style={{ background: "rgba(255,255,255,0.18)", border: "none", color: "#fff", width: 26, height: 26, borderRadius: 6, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      ×
+                    </button>
+                  </div>
+                  <div style={{ padding: "12px 18px", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, fontSize: 12, background: "#f8fafc" }}>
+                    <div><span style={{ color: "var(--text-3)" }}>Sueldo base</span><br /><strong>{fmtS(se.sueldoContrato ?? se.sueldoBase)}</strong></div>
+                    <div><span style={{ color: "var(--text-3)" }}>Sueldo bruto</span><br /><strong style={{ color: "#16a34a" }}>{fmtS(se.sueldoBruto)}</strong></div>
+                    <div><span style={{ color: "var(--text-3)" }}>Sueldo neto</span><br /><strong style={{ color: "#2563eb" }}>{fmtS(se.sueldoNeto)}</strong></div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <ApiAlert type="success" message={mensaje} />
+            <ApiAlert type="error" message={error} />
+
+            {resultadoEnvio && (
+              <div className="section-card" style={{ padding: "14px 18px", marginBottom: 16 }}>
+                <div style={{ display: "flex", gap: 16, fontSize: 13, marginBottom: resultadoEnvio.errores?.length ? 10 : 0 }}>
+                  <span><strong>Total:</strong> {resultadoEnvio.total ?? "—"}</span>
+                  <span style={{ color: "#16a34a" }}><strong>✓ Enviados:</strong> {resultadoEnvio.enviados ?? "—"}</span>
+                  <span style={{ color: "#dc2626" }}><strong>✗ Fallidos:</strong> {resultadoEnvio.fallidos ?? 0}</span>
+                </div>
+                {resultadoEnvio.errores?.length > 0 && (
+                  <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ textAlign: "left", color: "var(--text-3)" }}>
+                        <th style={{ padding: "4px 8px 4px 0" }}>Empleado</th>
+                        <th style={{ padding: "4px 0" }}>Motivo del fallo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {resultadoEnvio.errores.map((e, i) => (
+                        <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
+                          <td style={{ padding: "4px 8px 4px 0", fontWeight: 600 }}>{e.empleado}</td>
+                          <td style={{ padding: "4px 0", color: "#dc2626" }}>{e.message}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
 
             <div className="section-card" style={{ padding: 0, overflow: "hidden" }}>
               <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", background: "linear-gradient(135deg, #f0fdf4 0%, #eff6ff 100%)", display: "flex", alignItems: "center", gap: 12 }}>
@@ -238,14 +391,14 @@ export default function CalculoNomina() {
                 <div className="form-grid" style={{ gap: 12, marginBottom: 12 }}>
                   <div className="form-group">
                     <label>Mes</label>
-                    <select value={mes} onChange={e => setMes(e.target.value)}>
-                      {MESES.map(m => <option key={m.v} value={m.v}>{m.l}</option>)}
+                    <select value={mes} onChange={e => cambiarPeriodo("mes", e.target.value)}>
+                      {MESES.map(m => <option key={m.v} value={m.v} disabled={esPeriodoFuturo(m.v, anio)}>{m.l}</option>)}
                     </select>
                   </div>
                   <div className="form-group">
                     <label>Año</label>
-                    <select value={anio} onChange={e => setAnio(e.target.value)}>
-                      {ANIOS.map(a => <option key={a} value={a}>{a}</option>)}
+                    <select value={anio} onChange={e => cambiarPeriodo("anio", e.target.value)}>
+                      {ANIOS.map(a => <option key={a} value={a} disabled={esPeriodoFuturo(mes, a)}>{a}</option>)}
                     </select>
                   </div>
                 </div>
@@ -259,31 +412,77 @@ export default function CalculoNomina() {
                 </div>
               </div>
 
+              {/* Aviso contextual según estado del período */}
+              {periodoCalculado && !enVentanaRecalculo && (
+                <div style={{
+                  margin: "0 20px 12px", padding: "10px 14px", borderRadius: 8,
+                  background: "#fef9c3", border: "1px solid #fde047",
+                  display: "flex", alignItems: "center", gap: 8, fontSize: 13,
+                }}>
+                  <span style={{ fontSize: 18 }}>🔒</span>
+                  <span>Este período <strong>ya fue calculado y cerrado</strong>. Use "Cargar Período" para ver los datos.</span>
+                </div>
+              )}
+              {esMesPrevioY1ro && (
+                <div style={{
+                  margin: "0 20px 12px", padding: "10px 14px", borderRadius: 8,
+                  background: "#fef3c7", border: "1px solid #f59e0b",
+                  display: "flex", alignItems: "center", gap: 8, fontSize: 13,
+                }}>
+                  <span style={{ fontSize: 18 }}>⚠️</span>
+                  <span><strong>Ventana de cierre:</strong> hoy es el último día para recalcular la nómina de este período.</span>
+                </div>
+              )}
+              {esMesActual && (
+                <div style={{
+                  margin: "0 20px 12px", padding: "10px 14px", borderRadius: 8,
+                  background: "#eff6ff", border: "1px solid #93c5fd",
+                  display: "flex", alignItems: "center", gap: 8, fontSize: 13,
+                }}>
+                  <span style={{ fontSize: 18 }}>📊</span>
+                  <span>Mes en curso — puede calcular nómina provisional sin límite.</span>
+                </div>
+              )}
+
               <div style={{ padding: "0 20px 20px", display: "flex", gap: 10 }}>
-                <button className="btn btn-success" onClick={handleCalcular} disabled={calculando} style={{ flex: 1 }}>
-                  {calculando ? "Calculando..." : "⚙️ Calcular Nómina"}
+                <button
+                  className="btn btn-success"
+                  onClick={handleCalcular}
+                  disabled={calculando || verificando || calcularBloqueado}
+                  title={calcularBloqueado && !esPeriodoFuturo() ? "Período cerrado. Use Cargar Período para ver los datos." : ""}
+                  style={{ flex: 1, opacity: calcularBloqueado ? 0.45 : 1, cursor: calcularBloqueado ? "not-allowed" : "pointer" }}
+                >
+                  {calculando ? <><span className="btn-spinner" />Calculando...</> : calcularBloqueado ? "🔒 Cálculo bloqueado" : "⚙️ Calcular Nómina"}
                 </button>
-                <button className="btn btn-secondary" onClick={handleCargarPeriodo} disabled={loading} style={{ flex: 1 }}>
-                  {loading ? "Cargando..." : "📋 Cargar Período"}
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleCargarPeriodo}
+                  disabled={loading || verificando || cargarBloqueado}
+                  title={cargarBloqueado ? "Calcule la nómina primero para poder cargarla." : ""}
+                  style={{ flex: 1, opacity: cargarBloqueado ? 0.45 : 1, cursor: cargarBloqueado ? "not-allowed" : "pointer" }}
+                >
+                  {loading || verificando ? <><span className="btn-spinner" />Cargando...</> : cargarBloqueado ? "📋 Sin datos aún" : "📋 Cargar Período"}
                 </button>
               </div>
             </div>
 
             {resultList.length > 0 && (
-              <div className="section-card" style={{ padding: 0, overflow: "hidden" }}>
-                <div style={{ padding: "20px 20px 10px" }}>
+              <div className="section-card nomina-results-card" style={{ padding: 0, overflow: "hidden" }}>
+                <div className="nomina-results-header">
                   <h2 style={{ margin: 0 }}>
                     Resultados — {MESES.find(m => m.v === mes)?.l} {anio}
                     <span className="badge badge-success" style={{ marginLeft: "10px", fontSize: "12px" }}>
                       {resultList.length} empleado(s)
                     </span>
                   </h2>
+                  <button className="btn btn-primary btn-sm" onClick={() => setModalConfirmarEnvio(true)} disabled={enviandoTodos || resultList.length === 0}>
+                    {enviandoTodos ? <><span className="btn-spinner" />Enviando...</> : "Enviar todos"}
+                  </button>
                 </div>
-                <div className="table-wrapper" style={{ marginBottom: 0 }}>
-                  <table>
+                <div className="table-wrapper nomina-results-table-wrap" style={{ marginBottom: 0 }}>
+                  <table className="nomina-results-table">
                     <thead>
                       <tr>
-                        <th>ID</th>
                         <th>Empleado</th>
                         <th>Sueldo Base</th>
                         <th>Bonificaciones</th>
@@ -294,35 +493,32 @@ export default function CalculoNomina() {
                     </thead>
                     <tbody>
                       {resultList.map((n, i) => (
-                        <tr key={n.idNomina ?? i}>
-                          <td style={{ color: "var(--text-3)", fontSize: "13px" }}>{n.idNomina ?? i + 1}</td>
+                        <tr key={n.idNomina ?? i}
+                          onClick={() => setSelectedEmpleado(n)}
+                          style={{ cursor: "pointer" }}
+                          className={selectedEmpleado?.idNomina === n.idNomina ? "tr-selected" : ""}>
                           <td>
                             <strong>{n.nombreEmpleado ?? n.empleadoNombre ?? n.nombres ?? (n.idEmpleado ? `Emp. #${n.idEmpleado}` : "—")}</strong>
                           </td>
-                          <td>{fmtS(n.sueldoBase ?? n.sueldo)}</td>
+                          <td>{fmtS(n.sueldoContrato ?? n.sueldoBase ?? n.sueldo)}</td>
                           <td style={{ color: "var(--success)" }}>{fmtS(getBonif(n))}</td>
                           <td style={{ color: "#ef4444" }}>{fmtS(getDesc(n))}</td>
                           <td style={{ fontWeight: 700, color: "#0f172a" }}>{fmtS(n.sueldoNeto)}</td>
                           <td>
-                            <div style={{ display: "flex", gap: "4px" }}>
-                              <button className="btn btn-secondary btn-sm"
-                                title="Estructura salarial"
-                                onClick={() => abrirEstructura(n)}>
-                                💰
-                              </button>
+                            <div className="nomina-action-buttons">
                               <button className="btn btn-secondary btn-sm"
                                 title="Vista previa detallada"
-                                onClick={() => setPreviewNomina(n)}>
-                                👁
+                                onClick={e => { e.stopPropagation(); setPreviewNomina(n); }}>
+                                Ver
                               </button>
                               <button className="btn btn-secondary btn-sm"
-                                onClick={() => handleDescargar(n.idNomina)}>
-                                ⬇ PDF
+                                onClick={e => { e.stopPropagation(); handleDescargar(n.idNomina); }}>
+                                PDF
                               </button>
                               <button className="btn btn-primary btn-sm"
-                                onClick={() => handleEnviarComprobante(n.idNomina)}
+                                onClick={e => { e.stopPropagation(); handleEnviarComprobante(n.idNomina); }}
                                 disabled={enviando[n.idNomina]}>
-                                {enviando[n.idNomina] ? "..." : "📧 Email"}
+                                {enviando[n.idNomina] ? <span className="btn-spinner" /> : "Email"}
                               </button>
                             </div>
                           </td>
@@ -331,7 +527,7 @@ export default function CalculoNomina() {
                     </tbody>
                     <tfoot>
                       <tr style={{ background: "#f8fafc", fontWeight: 600 }}>
-                        <td colSpan={2} style={{ padding: "10px 12px", fontSize: "13px" }}>
+                        <td colSpan={1} style={{ padding: "10px 12px", fontSize: "13px" }}>
                           TOTALES ({resultList.length} empleados)
                         </td>
                         <td style={{ padding: "10px 12px" }}>{fmtS(totalBruto)}</td>
@@ -348,10 +544,14 @@ export default function CalculoNomina() {
 
             {resultList.length === 0 && (
               <div className="section-card">
-                <div className="empty-state">
-                  <div className="empty-state-icon">📊</div>
-                  <p>Seleccione un período y calcule o cargue la nómina para ver los resultados.</p>
-                </div>
+                {cargandoResultados ? (
+                  <Spinner text={calculando ? "Calculando nómina..." : "Cargando nómina..."} />
+                ) : (
+                  <div className="empty-state">
+                    <div className="empty-state-icon">📊</div>
+                    <p>Seleccione un período y calcule o cargue la nómina para ver los resultados.</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -398,7 +598,7 @@ export default function CalculoNomina() {
                 <li>Seleccione mes y año del período.</li>
                 <li>Presione <strong>Calcular Nómina</strong> para procesar.</li>
                 <li>Revise los resultados en la tabla.</li>
-                <li>Descargue o envíe comprobantes individualmente.</li>
+                <li>Descargue comprobantes, envíelos uno por uno o use el envío masivo del período.</li>
               </ol>
             </div>
           </div>
@@ -406,16 +606,44 @@ export default function CalculoNomina() {
         </div>
       </main>
 
+      {/* ── MODAL CONFIRMAR ENVÍO MASIVO ── */}
+      {modalConfirmarEnvio && (() => {
+        const n = resultList.length;
+        const segMin = n * 2;
+        const segMax = n * 4;
+        const fmtTiempo = (s) => s >= 60 ? `${Math.ceil(s / 60)} min` : `${s} seg`;
+        return (
+          <div className="modal-overlay">
+            <div className="modal-box" style={{ maxWidth: 440 }}>
+              <div className="modal-header">
+                <h3>📧 Enviar comprobantes por correo</h3>
+                <button className="modal-close" onClick={() => setModalConfirmarEnvio(false)}>×</button>
+              </div>
+              <div className="modal-body">
+                <p>Se enviarán <strong>{n} comprobante(s)</strong> de nómina al correo institucional (o personal, si no tiene) de cada empleado.</p>
+                <div style={{ background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 8, padding: "10px 14px", fontSize: 13, marginTop: 10 }}>
+                  ⏱️ El envío es secuencial (uno por uno), esto puede tardar aproximadamente <strong>{fmtTiempo(segMin)} a {fmtTiempo(segMax)}</strong>.
+                  No cierre ni recargue esta ventana mientras dice "Enviando...".
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setModalConfirmarEnvio(false)}>Cancelar</button>
+                <button className="btn btn-primary" onClick={handleEnviarTodos}>Confirmar envío</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── MODAL VISTA PREVIA NÓMINA ── */}
       {previewNomina && (() => {
         const n = previewNomina;
-        const base  = Number(n.sueldoBase ?? n.sueldo ?? 0);
+        const base  = Number(n.sueldoContrato ?? n.sueldoBase ?? n.sueldo ?? 0);
         const bonifs = [
           { label: "Bonif. Familiar",       val: n.bonifFamiliar },
           { label: "Bonif. Turno Nocturno", val: n.bonifTurnoNocturno },
           { label: "Bonif. Guardia",        val: n.bonifGuardia },
           { label: "Bonif. Riesgo",         val: n.bonifRiesgo },
-          { label: "Bonif. Cargo",          val: n.bonifCargo },
         ];
         const descs = [
           { label: "Descuento Tardanzas", val: n.descuentoTardanzas },
@@ -426,7 +654,7 @@ export default function CalculoNomina() {
         const neto       = Number(n.sueldoNeto ?? 0);
         const mesLabel   = MESES.find(m => m.v === (n.mes ?? mes))?.l ?? n.mes ?? mes;
         return (
-          <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setPreviewNomina(null)}>
+          <div className="modal-overlay">
             <div className="modal-box" style={{ maxWidth: 500 }}>
               <div className="modal-header">
                 <div>
@@ -488,27 +716,31 @@ export default function CalculoNomina() {
         const fmt = (v) => `S/ ${Number(v || 0).toLocaleString("es-PE", { minimumFractionDigits: 2 })}`;
         const mesLabel = MESES.find(m => m.v === mes)?.l ?? mes;
 
+        const esClinico  = n.esEmpleadoClinico  === true;
+        const esNocturno = n.tieneHorarioNocturno === true;
+
         const valorHora = db.sueldoBase > 0 ? db.sueldoBase / 30 / 8 : 0;
         const valorMin  = valorHora / 60;
         const horasDobles = Math.max(0, db.horasExtra - 2);
         const horasExtraBase = Math.max(0, Math.min(db.horasExtra, 2));
         const montoHorasExtra = (horasExtraBase * valorHora * 1.5) + (horasDobles * valorHora * 2);
-        const bFam    = db.tieneHijos ? db.sueldoBase * 0.10 * db.cantidadHijos : 0;
-        const bNoct   = db.horasNocturnas * valorHora * 0.15;
-        const bGuard  = db.cantidadGuardias * 50;
-        const bRiesgo = db.sueldoBase * 0.10;
-        const bCargo  = db.sueldoBase * 0.20;
+        const bFam    = db.tieneHijos && db.cantidadHijos > 0 ? db.sueldoBase * 0.10 : 0;
+        const bNoct   = esNocturno ? db.sueldoBase * 0.35 : 0;
+        const bGuard  = esClinico  ? db.cantidadGuardias * 50 : 0;
+        const bRiesgo = esClinico  ? db.sueldoBase * 0.10 : 0;
         const descTard = valorMin * db.minutosLate;
-        const bruto   = db.sueldoBase + montoHorasExtra + bFam + bNoct + bGuard + bRiesgo + bCargo;
+        const bruto   = db.sueldoBase + montoHorasExtra + bFam + bNoct + bGuard + bRiesgo;
         const tasa    = db.tipoPension === "AFP" ? 0.12 : 0.13;
         const descLey = bruto * tasa;
         const neto    = Math.max(0, bruto - descTard - descLey);
+        // bCargo eliminado — no corresponde a concepto legal peruano
 
+        const r1 = (v) => Math.round(Number(v ?? 0) * 10) / 10;
         const resetearValores = () => setDatosBase({
           sueldoBase:       Number(n.sueldoBase ?? 0),
-          horasTrabajadas:  Number(n.totalHorasTrabajadas ?? 0),
-          horasExtra:       Number(n.totalHorasExtra ?? 0),
-          horasNocturnas:   Number(n.totalHorasNocturnas ?? 0),
+          horasTrabajadas:  r1(n.totalHorasTrabajadas),
+          horasExtra:       r1(n.totalHorasExtra),
+          horasNocturnas:   r1(n.totalHorasNocturnas),
           minutosLate:      n.totalMinutosTardanza ?? 0,
           tieneHijos:       n.tieneHijos ?? (Number(n.cantidadHijos) > 0),
           cantidadHijos:    n.cantidadHijos ?? 0,
@@ -544,7 +776,19 @@ export default function CalculoNomina() {
         );
 
         const CalcRow = ({ label, formula, val, tipo = "bonif" }) => {
-          const isDesc = tipo === "desc";
+          const isDesc    = tipo === "desc";
+          const isBlocked = tipo === "blocked";
+          if (isBlocked) return (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 11px", background: "#f3f4f6", borderLeft: "3px solid #d1d5db", borderRadius: 8, marginBottom: 5, opacity: 0.6 }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af", display: "flex", alignItems: "center", gap: 5 }}>
+                  <span>🔒</span> {label}
+                </div>
+                <div style={{ fontSize: 10, color: "#c0c4cc", marginTop: 1 }}>{formula}</div>
+              </div>
+              <span style={{ fontWeight: 700, fontSize: 13, color: "#c0c4cc", flexShrink: 0, marginLeft: 8 }}>No aplica</span>
+            </div>
+          );
           return (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 11px", background: isDesc ? "#fff5f5" : "#f0fdf4", borderLeft: `3px solid ${isDesc ? "#dc2626" : "#16a34a"}`, borderRadius: 8, marginBottom: 5 }}>
               <div>
@@ -576,7 +820,7 @@ export default function CalculoNomina() {
               </div>
 
               {/* Body: two columns */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", maxHeight: "70vh", overflow: "hidden" }}>
+              <div className="nomina-modal-body">
 
                 {/* LEFT: Datos ingresados (editable) */}
                 <div style={{ padding: "18px 20px", borderRight: "1px solid #e5e7eb", overflowY: "auto", background: "#fff" }}>
@@ -585,12 +829,12 @@ export default function CalculoNomina() {
                     <span style={{ fontWeight: 700, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "#2563eb" }}>Datos Ingresados / Registrados</span>
                   </div>
 
-                  <InputField label="Sueldo Base (S/)" field="sueldoBase" step="1" />
+                  <InputField label="Sueldo Devengado (S/)" field="sueldoBase" step="1" />
                   <InputField label="Horas Trabajadas" field="horasTrabajadas" step="0.5" />
                   <InputField label="Horas Extra" field="horasExtra" step="0.5" />
-                  <InputField label="Horas Nocturnas" field="horasNocturnas" step="0.5" />
+                  <InputField label="Horas Nocturnas" field="horasNocturnas" step="0.5" disabled={!esNocturno} />
                   <InputField label="Tardanzas (minutos)" field="minutosLate" step="1" parse={v => Math.max(0, parseInt(v) || 0)} />
-                  <InputField label="Cantidad de Guardias" field="cantidadGuardias" step="1" parse={v => Math.max(0, parseInt(v) || 0)} />
+                  <InputField label="Cantidad de Guardias" field="cantidadGuardias" step="1" parse={v => Math.max(0, parseInt(v) || 0)} disabled={!esClinico} />
 
                   <ToggleGroup label="¿Tiene Hijos?" field="tieneHijos"
                     options={[
@@ -635,21 +879,18 @@ export default function CalculoNomina() {
                     val={montoHorasExtra} />
                   <CalcRow label="Bonif. Familiar"
                     formula={db.tieneHijos && db.cantidadHijos > 0
-                      ? `10% × ${fmt(db.sueldoBase)} × ${db.cantidadHijos} hijo(s)`
+                      ? `10% aplicado una vez por ${db.cantidadHijos} hijo(s) elegible(s)`
                       : "No aplica (sin hijos declarados)"}
                     val={bFam} />
-                  <CalcRow label="Bonif. Nocturna"
-                    formula={`${db.horasNocturnas}h × ${fmt(valorHora)}/h × 15%`}
-                    val={bNoct} />
-                  <CalcRow label="Bonif. Guardia"
-                    formula={`${db.cantidadGuardias} guardia(s) × S/ 50.00`}
-                    val={bGuard} />
-                  <CalcRow label="Bonif. Riesgo"
-                    formula={`10% × ${fmt(db.sueldoBase)}`}
-                    val={bRiesgo} />
-                  <CalcRow label="Bonif. Cargo"
-                    formula={`20% × ${fmt(db.sueldoBase)}`}
-                    val={bCargo} />
+                  {esNocturno
+                    ? <CalcRow label="Bonif. Nocturna" formula={`35% × ${fmt(db.sueldoBase)} (turno nocturno)`} val={bNoct} />
+                    : <CalcRow label="Bonif. Nocturna" formula="Solo para empleados con turno nocturno (≥ 19:00)" tipo="blocked" />}
+                  {esClinico
+                    ? <CalcRow label="Bonif. Guardia" formula={`${db.cantidadGuardias} guardia(s) × S/ 50.00`} val={bGuard} />
+                    : <CalcRow label="Bonif. Guardia" formula="Solo para departamentos clínicos" tipo="blocked" />}
+                  {esClinico
+                    ? <CalcRow label="Bonif. Riesgo" formula={`10% × ${fmt(db.sueldoBase)}`} val={bRiesgo} />
+                    : <CalcRow label="Bonif. Riesgo" formula="Solo para departamentos clínicos" tipo="blocked" />}
 
                   <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 11px", background: "#dcfce7", borderRadius: 8, margin: "8px 0 12px", fontWeight: 700, fontSize: 12 }}>
                     <span style={{ color: "#15803d" }}>Total Bruto</span>
@@ -682,7 +923,7 @@ export default function CalculoNomina() {
               {/* Footer */}
               <div style={{ padding: "12px 24px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", background: "#fff" }}>
                 <button className="btn btn-primary" onClick={() => handleGuardarAjuste({ neto })} disabled={guardandoAjuste} style={{ marginRight: 10 }}>
-                  {guardandoAjuste ? "Guardando..." : "Guardar cambios"}
+                  {guardandoAjuste ? <><span className="btn-spinner" />Guardando...</> : "Guardar cambios"}
                 </button>
                 <button className="btn btn-secondary" onClick={() => setModalEstructura(null)}>Cerrar</button>
               </div>

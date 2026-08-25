@@ -13,4 +13,10 @@ public interface JpaRegistroAsistenciaRepository extends JpaRepository<RegistroA
         LocalDate fechaInicio,
         LocalDate fechaFin
     );
+
+    List<RegistroAsistenciaModel> findByEmpleadoIdEmpleadoInAndFechaBetween(
+        List<Long> idsEmpleados,
+        LocalDate fechaInicio,
+        LocalDate fechaFin
+    );
 }

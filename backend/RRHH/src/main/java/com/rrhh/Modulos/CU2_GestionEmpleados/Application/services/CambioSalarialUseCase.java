@@ -152,7 +152,7 @@ public class CambioSalarialUseCase {
         auditoriaEmpleadoService.registrar(
                 empleado.getIdEmpleado(),
                 "CAMBIO_SALARIAL",
-                "CONTRATO",
+                "EMPLEADO",
                 valorAnterior,
                 valorNuevo
         );

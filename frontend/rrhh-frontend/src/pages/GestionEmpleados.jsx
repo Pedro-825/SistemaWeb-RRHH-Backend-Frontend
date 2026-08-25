@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react";
-import * as XLSX from "xlsx";
+﻿import { useState, useEffect, useRef } from "react";
 import Sidebar from "../components/Sidebar";
+import Spinner from "../components/Spinner";
+import ApiAlert from "../components/ApiAlert";
 import "../styles/Dashboard.css";
 import {
   listarEmpleados,
@@ -12,24 +13,58 @@ import {
   reactivarEmpleado,
   registrarSancion,
   registrarAscenso,
-  cambioSalarial,
   getDepartamentos,
   getHistorialEmpleado,
-  getHorarios,
-  asignarHorario,
-  getAsignacionesEmpleado,
   getAsignacionesActivas,
+  getBeneficiosEmpleado,
+  guardarPerfilBeneficios,
+  agregarFamiliarEmpleado,
+  actualizarFamiliarEmpleado,
+  eliminarFamiliarEmpleado,
+  getUser,
 } from "../services/api";
 
 const FORM_VACIO = {
   nombres: "", apellidos: "", docIdentidad: "DNI", numeroDi: "",
   fechaNac: "", sexo: "", estadoCivil: "", direccion: "",
-  correo: "", telefono: "", cargo: "", tipoContrato: "",
+  correo: "", telefono: "", cargo: "", rol: "", tipoContrato: "",
   fechaInicio: "", fechaFin: "", sueldo: "", idDpto: "",
 };
 
 const PAGE_SIZES = [10, 25, 50];
+const EMPLEADOS_CACHE_TTL_MS = 60_000;
 
+const PERFIL_BENEFICIOS_VACIO = {
+  regimenSalud: "ESSALUD",
+  regimenPension: "ONP",
+  afp: "",
+  cuspp: "",
+  tipoComisionAfp: "",
+  contactoEmergencia: "",
+  telefonoEmergencia: "",
+  vigenteDesde: "",
+  vigenteHasta: "",
+};
+
+const FAMILIAR_VACIO = {
+  nombres: "",
+  apellidos: "",
+  parentesco: "HIJO",
+  numeroDi: "",
+  fechaNacimiento: "",
+  esDerechohabiente: true,
+  elegibleAsignacionFamiliar: true,
+  validado: false,
+  coberturaDesde: "",
+  coberturaHasta: "",
+};
+
+
+const ESTADO_EMPLEADO_INFO = {
+  ACTIVO:       { label: "Activo",       clase: "emp-status-active" },
+  SUSPENDIDO:   { label: "Suspendido",   clase: "emp-status-suspended" },
+  DESVINCULADO: { label: "Desvinculado", clase: "emp-status-inactive" },
+};
 
 const DEPT_CARGOS = {
   "Recursos Humanos":  ["Especialista RRHH", "Analista RRHH", "Coordinador RRHH", "Asistente RRHH", "Auxiliar RRHH", "Administrador RRHH"],
@@ -42,6 +77,75 @@ const DEPT_CARGOS = {
   "Finanzas":          ["Contador", "Contadora", "Analista Financiero", "Tesorero", "Asistente Contable"],
   "Radiología":        ["Radiólogo", "Técnico en Radiología", "Operador de Equipos de Imagen"],
 };
+
+const cacheKey = (name, payload = "") => `rrhh:${name}:${payload}`;
+
+const leerCache = (key) => {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data?.expiresAt || data.expiresAt < Date.now()) {
+      sessionStorage.removeItem(key);
+      return null;
+    }
+    return data.value;
+  } catch {
+    return null;
+  }
+};
+
+const guardarCache = (key, value) => {
+  try {
+    sessionStorage.setItem(key, JSON.stringify({
+      value,
+      expiresAt: Date.now() + EMPLEADOS_CACHE_TTL_MS,
+    }));
+  } catch {
+    // El cache solo mejora la experiencia; si falla, no bloquea la pantalla.
+  }
+};
+
+const normalizarRol = (rol) => String(rol || "").trim().toUpperCase().replace(/^ROLE_/, "");
+
+const formatearCampoAuditoria = (campo) => String(campo || "")
+  .replace(/([a-z])([A-Z])/g, "$1 $2")
+  .replace(/_/g, " ")
+  .trim()
+  .replace(/\b\w/g, c => c.toUpperCase());
+
+const dividirValorHistorial = (valor) => {
+  if (valor == null || valor === "") return ["—"];
+  const raw = String(valor).trim();
+  const sinLlaves = raw.startsWith("{") && raw.endsWith("}")
+    ? raw.slice(1, -1)
+    : raw;
+  const partes = sinLlaves
+    .split(/\s+\|\s+|,\s*(?=[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+\s*=)/)
+    .map(p => p.trim())
+    .filter(Boolean);
+
+  if (partes.length === 0) return ["—"];
+
+  return partes.map(parte => {
+    const separador = parte.includes("=") ? "=" : parte.includes(":") ? ":" : null;
+    if (!separador) return parte;
+    const idx = parte.indexOf(separador);
+    const campo = formatearCampoAuditoria(parte.slice(0, idx));
+    const contenido = parte.slice(idx + 1).trim() || "—";
+    return `${campo}: ${contenido}`;
+  });
+};
+
+const ValorHistorial = ({ valor, muted = false }) => (
+  <span style={{ display: "flex", flexDirection: "column", gap: 3, whiteSpace: "normal", wordBreak: "break-word" }}>
+    {dividirValorHistorial(valor).map((linea, idx) => (
+      <span key={`${linea}-${idx}`} style={{ color: muted ? "var(--text-3)" : undefined, lineHeight: 1.35 }}>
+        {linea}
+      </span>
+    ))}
+  </span>
+);
 
 export default function GestionEmpleados() {
   const [empleados,     setEmpleados]     = useState([]);
@@ -67,25 +171,17 @@ export default function GestionEmpleados() {
   // Forms
   const [form,        setForm]        = useState(FORM_VACIO);
   const [sancionForm, setSancionForm] = useState({ idEmpleado: "", tipoSancion: "", diasSuspension: 0, justificacion: "" });
-  const [ascensoForm, setAscensoForm] = useState({ idEmpleado: "", nuevoCargo: "", nuevoSueldo: "" });
-  const [cambioForm,  setCambioForm]  = useState({ idEmpleado: "", nuevoSueldo: "" });
+  const [ascensoForm, setAscensoForm] = useState({ idEmpleado: "", nuevoCargo: "", nuevoRol: "", nuevoSueldo: "" });
 
   // Modals
   const [modalNuevo,      setModalNuevo]      = useState(false);
+  const [registrandoEmpleado, setRegistrandoEmpleado] = useState(false);
   const [modalEditar,     setModalEditar]     = useState(null);
   const [modalDesactivar, setModalDesactivar] = useState({ open: false, id: null, motivo: "" });
   const [modalReactivar,  setModalReactivar]  = useState({ open: false, id: null });
   const [modalSancion,    setModalSancion]    = useState({ open: false, id: null });
   const [modalAscenso,    setModalAscenso]    = useState({ open: false, id: null });
-  const [modalCambio,     setModalCambio]     = useState({ open: false, id: null });
-  const [modalSueldo,     setModalSueldo]     = useState(false);
-  const [sueldoModo,      setSueldoModo]      = useState("editar"); // "nuevo" | "editar"
-  const [showFechas,      setShowFechas]      = useState(false);
-  const [sueldoForm,      setSueldoForm]      = useState({
-    sueldoBase: "", bonifAsistencia: 0, bonifFamiliar: 0, bonifExtraordinaria: 0,
-    sistemaPensionario: "AFP", descuentoTardanza: 0, otrosDescuentos: 0,
-    horasSemanales: 48, horasExtra: 0,
-  });
+  const [, setShowFechas]      = useState(false);
 
   // Dropdown per row
   const [openDrop, setOpenDrop] = useState(null);
@@ -96,29 +192,54 @@ export default function GestionEmpleados() {
   const [historialData,  setHistorialData]  = useState([]);
   const [historialLoad,  setHistorialLoad]  = useState(false);
 
-  // Horario
-  const [horarios,      setHorarios]      = useState([]);
-  const [turnosMap,     setTurnosMap]     = useState({});  // { idEmpleado: {nombreTurno, horaEntrada, horaSalida} }
-  const [modalHorario,  setModalHorario]  = useState({ open: false, empleado: null, asignaciones: [], loading: false });
-  const HORARIO_VACIO = { idHorario: "", fechaDesde: "", fechaHasta: "", esTemporal: false };
-  const [horarioForm,   setHorarioForm]   = useState(HORARIO_VACIO);
+  // Ficha de beneficios y familia
+  const [modalBeneficios, setModalBeneficios] = useState({ open: false, empleado: null });
+  const [beneficiosLoad, setBeneficiosLoad] = useState(false);
+  const [beneficiosSaving, setBeneficiosSaving] = useState(false);
+  const [perfilBeneficios, setPerfilBeneficios] = useState(PERFIL_BENEFICIOS_VACIO);
+  const [familiares, setFamiliares] = useState([]);
+  const [familiarForm, setFamiliarForm] = useState(FAMILIAR_VACIO);
+  const [editFamiliarId, setEditFamiliarId] = useState(null);
 
-  useEffect(() => {
-    getDepartamentos().then(setDepartamentos).catch(() => {});
-    getHorarios().then(setHorarios).catch(() => {});
-    getAsignacionesActivas().then(lista => {
+  // Horario
+  const [turnosMap,     setTurnosMap]     = useState({});  // { idEmpleado: {nombreTurno, horaEntrada, horaSalida} }
+  const usuarioActual = getUser();
+  const empleadoAscenso = empleados.find(emp => Number(emp.idEmpleado) === Number(modalAscenso.id));
+  const esAutoCambioRol = Number(usuarioActual?.idEmpleado) === Number(modalAscenso.id);
+  const actorEsRrhh = normalizarRol(usuarioActual?.rol) === "RRHH";
+  const empleadoAscensoEsRrhh = normalizarRol(empleadoAscenso?.rol) === "RRHH";
+  const bloqueoRrhhSobreRrhh = actorEsRrhh && empleadoAscensoEsRrhh && !esAutoCambioRol;
+
+  const cargarTurnosActivos = async () => {
+    const key = cacheKey("turnos-activos");
+    const cached = leerCache(key);
+    if (cached) {
+      setTurnosMap(cached);
+    }
+    try {
+      const lista = await getAsignacionesActivas();
       const map = {};
       (lista || []).forEach(a => { map[a.idEmpleado] = a; });
       setTurnosMap(map);
-    }).catch(() => {});
+      guardarCache(key, map);
+    } catch {
+      if (!cached) setTurnosMap({});
+    }
+  };
+
+  useEffect(() => {
+    getDepartamentos().then(setDepartamentos).catch(() => {});
+    cargarTurnosActivos();
   }, []);
 
   useEffect(() => {
-    const handler = (e) => {
+    const close = (e) => {
       if (dropRef.current && !dropRef.current.contains(e.target)) setOpenDrop(null);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+    };
   }, []);
 
   // Efecto unificado: re-fetcha automáticamente al cambiar cualquier filtro, página o pageSize.
@@ -127,7 +248,14 @@ export default function GestionEmpleados() {
     let cancelled = false;
 
     const doFetch = async () => {
-      setLoading(true);
+      const cachePayload = JSON.stringify({ searchName: searchName.trim(), filterArea, filterCargo, filterEstado, page, pageSize, fetchKey });
+      const key = cacheKey("empleados", cachePayload);
+      const cached = leerCache(key);
+      if (cached) {
+        setEmpleados(cached.list || []);
+        setTotalElements(cached.totalElements || 0);
+      }
+      setLoading(!cached);
       setError("");
       try {
         let data;
@@ -145,9 +273,10 @@ export default function GestionEmpleados() {
           const list = data?.content ?? (Array.isArray(data) ? data : []);
           setEmpleados(list);
           setTotalElements(data?.totalElements ?? list.length);
+          guardarCache(key, { list, totalElements: data?.totalElements ?? list.length });
         }
-      } catch {
-        if (!cancelled) setError("Error al cargar empleados");
+      } catch (err) {
+        if (!cancelled) setError(err);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -163,6 +292,115 @@ export default function GestionEmpleados() {
 
   const cargarEmpleados = () => setFetchKey(k => k + 1);
 
+  const cargarBeneficios = async (empleado) => {
+    setModalBeneficios({ open: true, empleado });
+    setBeneficiosLoad(true);
+    setPerfilBeneficios(PERFIL_BENEFICIOS_VACIO);
+    setFamiliares([]);
+    setFamiliarForm(FAMILIAR_VACIO);
+    setEditFamiliarId(null);
+    try {
+      const data = await getBeneficiosEmpleado(empleado.idEmpleado);
+      setPerfilBeneficios({ ...PERFIL_BENEFICIOS_VACIO, ...(data?.perfil || {}) });
+      setFamiliares(Array.isArray(data?.familiares) ? data.familiares : []);
+    } catch (err) {
+      setMensajeOk(false);
+      setMensaje(err);
+    } finally {
+      setBeneficiosLoad(false);
+    }
+  };
+
+  const guardarPerfilNomina = async () => {
+    if (!modalBeneficios.empleado) return;
+    if (!perfilBeneficios.contactoEmergencia?.trim() || !perfilBeneficios.telefonoEmergencia?.trim()) {
+      setMensajeOk(false);
+      setMensaje("Complete el contacto y teléfono de emergencia antes de guardar.");
+      return;
+    }
+    setBeneficiosSaving(true);
+    try {
+      const limpio = { ...perfilBeneficios };
+      if (limpio.regimenPension !== "AFP") {
+        limpio.afp = "";
+        limpio.cuspp = "";
+        limpio.tipoComisionAfp = "";
+      }
+      const actualizado = await guardarPerfilBeneficios(modalBeneficios.empleado.idEmpleado, limpio);
+      setPerfilBeneficios({ ...PERFIL_BENEFICIOS_VACIO, ...(actualizado || {}) });
+      setMensajeOk(true);
+      setMensaje("Perfil previsional actualizado. Se usará en el próximo cálculo de nómina.");
+    } catch (err) {
+      setMensajeOk(false);
+      setMensaje(err);
+    } finally {
+      setBeneficiosSaving(false);
+    }
+  };
+
+  const guardarFamiliar = async (e) => {
+    e.preventDefault();
+    if (!modalBeneficios.empleado) return;
+    setBeneficiosSaving(true);
+    try {
+      const payload = {
+        ...familiarForm,
+        coberturaDesde: familiarForm.coberturaDesde || null,
+        coberturaHasta: familiarForm.coberturaHasta || null,
+      };
+      const guardado = editFamiliarId
+        ? await actualizarFamiliarEmpleado(modalBeneficios.empleado.idEmpleado, editFamiliarId, payload)
+        : await agregarFamiliarEmpleado(modalBeneficios.empleado.idEmpleado, payload);
+      setFamiliares(prev => editFamiliarId
+        ? prev.map(f => Number(f.id) === Number(editFamiliarId) ? guardado : f)
+        : [...prev, guardado]);
+      setFamiliarForm(FAMILIAR_VACIO);
+      setEditFamiliarId(null);
+      setMensajeOk(true);
+      setMensaje("Familiar actualizado. Si es hijo validado, impactará en la asignación familiar.");
+    } catch (err) {
+      setMensajeOk(false);
+      setMensaje(err);
+    } finally {
+      setBeneficiosSaving(false);
+    }
+  };
+
+  const editarFamiliar = (f) => {
+    setEditFamiliarId(f.id);
+    setFamiliarForm({
+      ...FAMILIAR_VACIO,
+      nombres: f.nombres || "",
+      apellidos: f.apellidos || "",
+      parentesco: f.parentesco || "HIJO",
+      numeroDi: f.numeroDi || "",
+      fechaNacimiento: f.fechaNacimiento || "",
+      esDerechohabiente: Boolean(f.esDerechohabiente),
+      elegibleAsignacionFamiliar: Boolean(f.elegibleAsignacionFamiliar),
+      validado: Boolean(f.validado),
+      coberturaDesde: f.coberturaDesde || "",
+      coberturaHasta: f.coberturaHasta || "",
+    });
+  };
+
+  const quitarFamiliar = async (idFamiliar) => {
+    if (!modalBeneficios.empleado) return;
+    setBeneficiosSaving(true);
+    try {
+      await eliminarFamiliarEmpleado(modalBeneficios.empleado.idEmpleado, idFamiliar);
+      setFamiliares(prev => prev.filter(f => Number(f.id) !== Number(idFamiliar)));
+      if (Number(editFamiliarId) === Number(idFamiliar)) {
+        setEditFamiliarId(null);
+        setFamiliarForm(FAMILIAR_VACIO);
+      }
+    } catch (err) {
+      setMensajeOk(false);
+      setMensaje(err);
+    } finally {
+      setBeneficiosSaving(false);
+    }
+  };
+
   const handleBuscar = () => {
     if (page !== 0) setPage(0);
     else setFetchKey(k => k + 1);
@@ -177,6 +415,7 @@ export default function GestionEmpleados() {
   const handleRegistrar = async (e) => {
     e.preventDefault();
     setMensaje("");
+    setRegistrandoEmpleado(true);
     try {
       const data = await registrarEmpleado({
         ...form,
@@ -190,19 +429,16 @@ export default function GestionEmpleados() {
         sexo: form.sexo || null,
         contrasenia: form.numeroDi,
       });
-      if (!data?.success) {
-        setMensajeOk(false);
-        setMensaje(data?.message || "No se pudo registrar el empleado.");
-        return;
-      }
       setMensajeOk(true);
-      setMensaje("Empleado registrado correctamente");
+      setMensaje(data?.message || "Empleado registrado correctamente");
       setForm(FORM_VACIO);
       setModalNuevo(false);
       cargarEmpleados();
-    } catch {
+    } catch (err) {
       setMensajeOk(false);
-      setMensaje("Error al registrar empleado. Verifique los datos.");
+      setMensaje(err);
+    } finally {
+      setRegistrandoEmpleado(false);
     }
   };
 
@@ -211,7 +447,6 @@ export default function GestionEmpleados() {
     if (!modalEditar) return;
     try {
       await actualizarEmpleado(modalEditar.idEmpleado, {
-        cargo: modalEditar.cargo,
         correo: modalEditar.correo,
         telefono: modalEditar.telefono,
         direccion: modalEditar.direccion,
@@ -222,32 +457,39 @@ export default function GestionEmpleados() {
       setMensaje("Datos del empleado actualizados correctamente");
       setModalEditar(null);
       cargarEmpleados();
-    } catch {
-      setMensaje("Error al actualizar el empleado.");
+    } catch (err) {
+      setMensajeOk(false);
+      setMensaje(err);
     }
   };
 
   const confirmarDesactivar = async () => {
     if (!modalDesactivar.motivo.trim()) return;
     try {
-      await desactivarEmpleado(modalDesactivar.id, modalDesactivar.motivo);
-      setMensaje("Empleado desactivado correctamente");
+      const resp = await desactivarEmpleado(modalDesactivar.id, modalDesactivar.motivo);
+      setMensaje(resp?.message || "Empleado desactivado correctamente");
+      setMensajeOk(true);
       setModalDesactivar({ open: false, id: null, motivo: "" });
       cargarEmpleados();
-    } catch {
-      setMensaje("Error al desactivar el empleado");
+      cargarTurnosActivos();
+    } catch (err) {
+      setMensaje(err);
+      setMensajeOk(false);
       setModalDesactivar({ open: false, id: null, motivo: "" });
     }
   };
 
   const confirmarReactivar = async () => {
     try {
-      await reactivarEmpleado(modalReactivar.id, "Reactivación manual");
-      setMensaje("Empleado reactivado correctamente");
+      const resp = await reactivarEmpleado(modalReactivar.id, "Reactivación manual");
+      setMensaje(resp?.message || "Empleado reactivado correctamente");
+      setMensajeOk(true);
       setModalReactivar({ open: false, id: null });
       cargarEmpleados();
-    } catch {
-      setMensaje("Error al reactivar el empleado");
+      cargarTurnosActivos();
+    } catch (err) {
+      setMensaje(err);
+      setMensajeOk(false);
       setModalReactivar({ open: false, id: null });
     }
   };
@@ -255,140 +497,61 @@ export default function GestionEmpleados() {
   const handleSancion = async (e) => {
     e.preventDefault();
     try {
-      await registrarSancion(sancionForm.idEmpleado, {
+      const resp = await registrarSancion(sancionForm.idEmpleado, {
         tipoSancion: sancionForm.tipoSancion,
         diasSuspension: parseInt(sancionForm.diasSuspension),
         justificacion: sancionForm.justificacion,
       });
-      setMensaje("Sanción registrada correctamente");
+      setMensajeOk(true);
+      setMensaje(resp?.message || "Sanción registrada correctamente");
       setSancionForm({ idEmpleado: "", tipoSancion: "", diasSuspension: 0, justificacion: "" });
       setModalSancion({ open: false, id: null });
-    } catch {
-      setMensaje("Error al registrar la sanción");
+      cargarEmpleados();
+    } catch (err) {
+      setMensajeOk(false);
+      setMensaje(err);
     }
   };
 
   const handleAscenso = async (e) => {
     e.preventDefault();
+    if (!ascensoForm.nuevoRol) {
+      setMensajeOk(false);
+      setMensaje("Seleccione el nuevo rol del empleado.");
+      return;
+    }
     try {
-      await registrarAscenso(ascensoForm.idEmpleado, { nuevoCargo: ascensoForm.nuevoCargo });
-      setMensaje("Ascenso registrado correctamente");
-      setAscensoForm({ idEmpleado: "", nuevoCargo: "", nuevoSueldo: "" });
+      const resp = await registrarAscenso(ascensoForm.idEmpleado, {
+        nuevoCargo: ascensoForm.nuevoCargo,
+        nuevoRol: ascensoForm.nuevoRol,
+      });
+      setMensajeOk(true);
+      setMensaje(resp?.message || "Ascenso registrado correctamente");
+      setAscensoForm({ idEmpleado: "", nuevoCargo: "", nuevoRol: "", nuevoSueldo: "" });
       setModalAscenso({ open: false, id: null });
       cargarEmpleados();
-    } catch {
-      setMensaje("Error al registrar el ascenso");
-    }
-  };
-
-  const handleCambioSalarial = async (e) => {
-    e.preventDefault();
-    try {
-      await cambioSalarial(cambioForm.idEmpleado, { nuevoSueldo: parseFloat(cambioForm.nuevoSueldo) });
-      setMensaje("Cambio salarial registrado correctamente");
-      setCambioForm({ idEmpleado: "", nuevoSueldo: "" });
-      setModalCambio({ open: false, id: null });
-      cargarEmpleados();
-    } catch {
-      setMensaje("Error al registrar el cambio salarial");
-    }
-  };
-
-  const openDropMenu = (id) => { setOpenDrop(openDrop === id ? null : id); };
-
-  const abrirModalHorario = async (emp) => {
-    setOpenDrop(null);
-    setHorarioForm(HORARIO_VACIO);
-    setModalHorario({ open: true, empleado: emp, asignaciones: [], loading: true });
-    try {
-      const data = await getAsignacionesEmpleado(emp.idEmpleado);
-      setModalHorario(m => ({ ...m, asignaciones: data || [], loading: false }));
-    } catch {
-      setModalHorario(m => ({ ...m, loading: false }));
-    }
-  };
-
-  const handleAsignarHorario = async (e) => {
-    e.preventDefault();
-    try {
-      await asignarHorario({
-        idEmpleado: modalHorario.empleado.idEmpleado,
-        idHorario:  Number(horarioForm.idHorario),
-        fechaDesde: horarioForm.fechaDesde,
-        fechaHasta: horarioForm.fechaHasta || null,
-        esTemporal: horarioForm.esTemporal,
-      });
-      // Refrescar historial en el modal
-      const data = await getAsignacionesEmpleado(modalHorario.empleado.idEmpleado);
-      setModalHorario(m => ({ ...m, asignaciones: data || [] }));
-      // Refrescar columna Turno en la tabla
-      const activas = await getAsignacionesActivas();
-      const map = {};
-      (activas || []).forEach(a => { map[a.idEmpleado] = a; });
-      setTurnosMap(map);
-      setHorarioForm(HORARIO_VACIO);
-      setMensaje("Horario asignado correctamente");
-      setMensajeOk(true);
-    } catch {
-      setMensaje("Error al asignar horario");
+    } catch (err) {
       setMensajeOk(false);
+      setMensaje(err);
     }
   };
 
-  const abrirSueldoDetalle = (modo = "editar") => {
-    const base = modo === "nuevo" ? (form.sueldo ?? "") : (modalEditar?.sueldo ?? "");
-    setSueldoForm(f => ({ ...f, sueldoBase: base }));
-    setSueldoModo(modo);
-    setModalSueldo(true);
-  };
-
-  const aplicarCambioSueldo = () => {
-    if (sueldoModo === "nuevo") {
-      setForm(f => ({ ...f, sueldo: sueldoForm.sueldoBase }));
-    } else {
-      setModalEditar(prev => ({ ...prev, sueldo: sueldoForm.sueldoBase }));
-    }
-    setModalSueldo(false);
+  const openDropMenu = (id, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (openDrop === id) { setOpenDrop(null); return; }
+    setOpenDrop(id);
   };
 
   const totalPages = Math.max(1, Math.ceil(totalElements / pageSize));
 
-  const formatFecha = (str) => {
-    if (!str) return "—";
-    const d = new Date(str);
-    return isNaN(d) ? str : `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()}`;
-  };
-
-  const formatSueldo = (v) =>
-    v != null ? `S/ ${Number(v).toLocaleString("es-PE", { minimumFractionDigits: 2 })}` : "—";
-
-  const exportarEmpleados = () => {
-    if (!empleados.length) return;
-    const data = empleados.map(e => ({
-      "ID":             e.idEmpleado ?? "—",
-      "Nombre Completo": `${e.nombres ?? ""} ${e.apellidos ?? ""}`.trim(),
-      "DNI":            e.numeroDi ?? "—",
-      "Cargo":          e.cargo ?? "—",
-      "Departamento":           e.departamento ?? "—",
-      "Sueldo Base":    e.sueldo != null ? Number(e.sueldo).toFixed(2) : "—",
-      "Estado":         e.estado ?? "—",
-      "Tipo Contrato":  e.tipoContrato ?? "—",
-      "Fecha Ingreso":  formatFecha(e.fechaInicio),
-      "Correo":         e.correo ?? "—",
-      "Teléfono":       e.telefono ?? "—",
-    }));
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Empleados");
-    XLSX.writeFile(wb, `empleados_${new Date().toISOString().split("T")[0]}.xlsx`);
-  };
 
   return (
     <div className="dashboard">
       <Sidebar rol="RRHH" />
 
-      <main className="main-content">
-        <header className="main-header header-rrhh">
+      <main className="main-content empleados-home">
+        <header className="main-header header-rrhh empleados-header">
           <div className="header-left">
             <span className="page-breadcrumb">Dashboard / Gestión de Empleados</span>
             <h1>Gestión de Empleados</h1>
@@ -400,20 +563,15 @@ export default function GestionEmpleados() {
             <button className="btn btn-success" onClick={() => { setForm(FORM_VACIO); setShowFechas(false); setMensaje(""); setModalNuevo(true); }}>
               ＋ Nuevo Empleado
             </button>
-            <button className="btn btn-primary" onClick={exportarEmpleados}>⬇ Exportar</button>
           </div>
         </header>
 
-        {mensaje && (
-          <div className={`alert ${mensajeOk ? "alert-success" : "alert-warning"}`}>
-            {mensajeOk ? "✅" : "⚠️"} {mensaje}
-          </div>
-        )}
-        {error   && <div className="alert alert-warning">⚠️ {error}</div>}
+        <ApiAlert type={mensajeOk ? "success" : "error"} message={mensaje} />
+        <ApiAlert type="error" message={error} />
 
         {/* ── FILTER ROW ── */}
-        <div className="filter-row">
-          <div className="filter-group">
+        <div className="filter-row empleados-filters">
+          <div className="filter-group empleados-field">
             <label className="filter-label">Tipo Documento</label>
             <select className="filter-select" value={filterDocType} onChange={e => setFilterDocType(e.target.value)}>
               <option value="">Todos</option>
@@ -421,7 +579,7 @@ export default function GestionEmpleados() {
               <option value="CE">Carnet Ext.</option>
             </select>
           </div>
-          <div className="filter-group">
+          <div className="filter-group empleados-field">
             <label className="filter-label">Departamento</label>
             <select className="filter-select" value={filterArea} onChange={e => { setFilterArea(e.target.value); setFilterCargo(""); }}>
               <option value="">Todos</option>
@@ -430,7 +588,7 @@ export default function GestionEmpleados() {
               ))}
             </select>
           </div>
-          <div className="filter-group">
+          <div className="filter-group empleados-field">
             <label className="filter-label">Cargo</label>
             <select className="filter-select" value={filterCargo} onChange={e => setFilterCargo(e.target.value)}>
               <option value="">Todos</option>
@@ -442,15 +600,16 @@ export default function GestionEmpleados() {
               ))}
             </select>
           </div>
-          <div className="filter-group">
+          <div className="filter-group empleados-field">
             <label className="filter-label">Estado</label>
             <select className="filter-select" value={filterEstado} onChange={e => setFilterEstado(e.target.value)}>
               <option value="">Todos</option>
               <option value="ACTIVO">Activo</option>
-              <option value="INACTIVO">Inactivo</option>
+              <option value="SUSPENDIDO">Suspendido</option>
+              <option value="DESVINCULADO">Desvinculado</option>
             </select>
           </div>
-          <div className="filter-group filter-search">
+          <div className="filter-group filter-search empleados-field empleados-search">
             <label className="filter-label">Buscar por nombre</label>
             <div className="filter-search-wrap">
               <input className="filter-input" placeholder="Ingrese nombre" value={searchName}
@@ -459,17 +618,17 @@ export default function GestionEmpleados() {
               <span className="filter-search-icon">🔍</span>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: "8px", position: "relative", top: "-5px" }}>
-            <button className="btn btn-primary btn-sm" onClick={handleBuscar}>Buscar</button>
+          <div className="empleados-filter-actions">
+            <button className="btn btn-primary btn-sm empleados-search-btn" onClick={handleBuscar}>Buscar</button>
             <button className="btn btn-secondary btn-sm" onClick={handleLimpiar}>☰ Limpiar filtros</button>
           </div>
         </div>
 
         {/* ── TABLE ── */}
-        <div className="section-card" style={{ padding: 0, overflow: "hidden" }}>
+        <div className="section-card empleados-table-card" style={{ padding: 0 }}>
           <div className="table-wrapper" style={{ marginBottom: 0 }} ref={dropRef}>
             {loading ? (
-              <div className="loading-text">Cargando empleados...</div>
+              <Spinner />
             ) : (
               <table className="table-empleados">
                 <thead>
@@ -497,14 +656,17 @@ export default function GestionEmpleados() {
                       </td></tr>
                     );
                     return visibles.map(emp => (
-                    <tr key={emp.idEmpleado}>
-                      <td>{emp.nombres} {emp.apellidos}</td>
-                      <td style={{ color: "var(--text-2)" }}>
+                    <tr
+                      key={emp.idEmpleado}
+                      className={openDrop === emp.idEmpleado ? "empleado-row-dropdown-open" : ""}
+                    >
+                      <td data-label="Nombre Completo">{emp.nombres} {emp.apellidos}</td>
+                      <td data-label="Tipo Doc / DNI" style={{ color: "var(--text-2)" }}>
                         {emp.docIdentidad ?? "DNI"} · {emp.numeroDi}
                       </td>
-                      <td>{emp.departamento ?? "—"}</td>
-                      <td>{emp.cargo ?? "—"}</td>
-                      <td style={{ textAlign: "center" }}>
+                      <td data-label="Departamento">{emp.departamento ?? "—"}</td>
+                      <td data-label="Cargo">{emp.cargo ?? "—"}</td>
+                      <td data-label="Turno" style={{ textAlign: "center" }}>
                         {turnosMap[emp.idEmpleado] ? (
                           <span style={{
                             display: "inline-flex", flexDirection: "column", alignItems: "center",
@@ -521,20 +683,22 @@ export default function GestionEmpleados() {
                           <span style={{ color: "var(--text-3)", fontSize: 12 }}>—</span>
                         )}
                       </td>
-                      <td>
-                        <span className={`emp-status-dot ${emp.estado === "ACTIVO" ? "emp-status-active" : "emp-status-inactive"}`}>
-                          {emp.estado === "ACTIVO" ? "Activo" : "Inactivo"}
+                      <td data-label="Estado">
+                        <span className={`emp-status-dot ${ESTADO_EMPLEADO_INFO[emp.estado]?.clase ?? "emp-status-inactive"}`}>
+                          {ESTADO_EMPLEADO_INFO[emp.estado]?.label ?? emp.estado ?? "—"}
                         </span>
                       </td>
-                      <td>
+                      <td data-label="Acciones">
                         <div style={{ display: "inline-flex", gap: "6px", alignItems: "center" }}>
-                          <button className="btn btn-secondary btn-sm"
-                            onClick={() => setModalEditar({ ...emp })}>
-                            ✏️ Editar
-                          </button>
+                          {emp.estado !== "DESVINCULADO" && (
+                            <button className="btn btn-secondary btn-sm"
+                              onClick={() => setModalEditar({ ...emp })}>
+                              ✏️ Editar
+                            </button>
+                          )}
                           <div className="action-drop-wrap">
-                            <button className="action-drop-btn"
-                              onClick={() => openDropMenu(emp.idEmpleado)}>
+                            <button type="button" className="action-drop-btn"
+                              onClick={(e) => openDropMenu(emp.idEmpleado, e)}>
                               ⋯
                             </button>
                             {openDrop === emp.idEmpleado && (
@@ -542,29 +706,34 @@ export default function GestionEmpleados() {
                                 {emp.estado === "ACTIVO" ? (
                                   <div className="action-drop-item drop-red"
                                     onClick={() => { setModalDesactivar({ open: true, id: emp.idEmpleado, motivo: "" }); setOpenDrop(null); }}>
-                                    🚫 Desactivar empleado
+                                    <span className="action-drop-icon">🚫</span>
+                                    <span>Desactivar empleado</span>
                                   </div>
                                 ) : (
                                   <div className="action-drop-item drop-green"
                                     onClick={() => { setModalReactivar({ open: true, id: emp.idEmpleado }); setOpenDrop(null); }}>
-                                    ✅ Reactivar empleado
+                                    <span className="action-drop-icon">✅</span>
+                                    <span>Reactivar empleado</span>
                                   </div>
                                 )}
-                                <div className="action-drop-item drop-yellow"
-                                  onClick={() => { setModalSancion({ open: true, id: emp.idEmpleado }); setSancionForm(f => ({ ...f, idEmpleado: emp.idEmpleado })); setOpenDrop(null); }}>
-                                  ⚠️ Registrar sanción
-                                </div>
-                                <div className="action-drop-item drop-green"
-                                  onClick={() => { setModalAscenso({ open: true, id: emp.idEmpleado }); setAscensoForm(f => ({ ...f, idEmpleado: emp.idEmpleado })); setOpenDrop(null); }}>
-                                  ↑ Registrar ascenso
-                                </div>
-                                <div className="action-drop-item drop-blue"
-                                  onClick={() => { setModalCambio({ open: true, id: emp.idEmpleado }); setCambioForm(f => ({ ...f, idEmpleado: emp.idEmpleado })); setOpenDrop(null); }}>
-                                  💲 Cambio salarial
-                                </div>
-                                <div className="action-drop-item drop-blue"
-                                  onClick={() => abrirModalHorario(emp)}>
-                                  📅 Asignar horario
+                                {emp.estado !== "DESVINCULADO" && (
+                                  <div className="action-drop-item drop-yellow"
+                                    onClick={() => { setModalSancion({ open: true, id: emp.idEmpleado }); setSancionForm(f => ({ ...f, idEmpleado: emp.idEmpleado })); setOpenDrop(null); }}>
+                                    <span className="action-drop-icon">⚠️</span>
+                                    <span>Registrar sanción</span>
+                                  </div>
+                                )}
+                                {emp.estado === "ACTIVO" && (
+                                  <div className="action-drop-item drop-green"
+                                    onClick={() => { setModalAscenso({ open: true, id: emp.idEmpleado }); setAscensoForm(f => ({ ...f, idEmpleado: emp.idEmpleado, nuevoCargo: "", nuevoRol: emp.rol || "" })); setOpenDrop(null); }}>
+                                    <span className="action-drop-icon">↑</span>
+                                    <span>Cambio de cargo/rol</span>
+                                  </div>
+                                )}
+                                <div className="action-drop-item drop-gray"
+                                  onClick={() => { setOpenDrop(null); cargarBeneficios(emp); }}>
+                                  <span className="action-drop-icon">🧾</span>
+                                  <span>Beneficios y familia</span>
                                 </div>
                                 <div className="action-drop-item drop-gray"
                                   onClick={async () => {
@@ -581,7 +750,8 @@ export default function GestionEmpleados() {
                                       setHistorialLoad(false);
                                     }
                                   }}>
-                                  🕐 Ver historial
+                                  <span className="action-drop-icon">🕐</span>
+                                  <span>Ver historial</span>
                                 </div>
                               </div>
                             )}
@@ -633,7 +803,7 @@ export default function GestionEmpleados() {
 
       {/* ══ MODAL: NUEVO EMPLEADO ══ */}
       {modalNuevo && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && (setModalNuevo(false), setForm(FORM_VACIO), setShowFechas(false))}>
+        <div className="modal-overlay">
           <div className="modal-box modal-box-wide">
             <div className="modal-header">
               <div><h3>➕ Registrar Nuevo Empleado</h3></div>
@@ -713,12 +883,26 @@ export default function GestionEmpleados() {
                   </div>
                   <div className="form-group">
                     <label>Cargo *</label>
-                    <select value={form.cargo} onChange={e => setForm({ ...form, cargo: e.target.value })} required>
+                    <select
+                      value={form.cargo}
+                      onChange={e => setForm({ ...form, cargo: e.target.value })}
+                      required
+                      disabled={!form.idDpto}
+                    >
                       <option value="">Seleccione cargo</option>
                       {(form.idDpto
                         ? DEPT_CARGOS[departamentos.find(d => d.idDpto === parseInt(form.idDpto))?.nombre] ?? []
-                        : Object.values(DEPT_CARGOS).flat().sort()
+                        : []
                       ).map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Rol del sistema *</label>
+                    <select value={form.rol} onChange={e => setForm({ ...form, rol: e.target.value })} required>
+                      <option value="">Seleccione un rol</option>
+                      <option value="EMPLEADO">Empleado</option>
+                      <option value="RRHH">RRHH</option>
+                      <option value="GERENCIA">Gerencia</option>
                     </select>
                   </div>
                   <div className="form-group">
@@ -738,14 +922,10 @@ export default function GestionEmpleados() {
                   </div>
                   <div className="form-group">
                     <label>Sueldo Base (S/) *</label>
-                    <button type="button" className="sueldo-detalle-btn" onClick={() => abrirSueldoDetalle("nuevo")}>
-                      <span className="sueldo-detalle-valor">
-                        {form.sueldo ? formatSueldo(form.sueldo) : "Sin definir"}
-                      </span>
-                      <span className="sueldo-detalle-hint">Ver estructura salarial →</span>
-                    </button>
-                    {/* campo oculto para validación required */}
-                    <input type="hidden" value={form.sueldo} required />
+                    <input type="number" step="0.01" min="0" placeholder="0.00"
+                      value={form.sueldo}
+                      onChange={e => setForm({ ...form, sueldo: e.target.value })}
+                      required />
                   </div>
 
                   {form.tipoContrato && (
@@ -779,8 +959,10 @@ export default function GestionEmpleados() {
               </form>
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => { setModalNuevo(false); setForm(FORM_VACIO); setShowFechas(false); }}>Cancelar</button>
-              <button className="btn btn-success" type="submit" form="form-nuevo">✅ Registrar Empleado</button>
+              <button className="btn btn-secondary" onClick={() => { setModalNuevo(false); setForm(FORM_VACIO); setShowFechas(false); }} disabled={registrandoEmpleado}>Cancelar</button>
+              <button className="btn btn-success" type="submit" form="form-nuevo" disabled={registrandoEmpleado}>
+                {registrandoEmpleado ? "Cargando" : "✅ Registrar Empleado"}
+              </button>
             </div>
           </div>
         </div>
@@ -788,7 +970,7 @@ export default function GestionEmpleados() {
 
       {/* ══ MODAL: EDITAR ══ */}
       {modalEditar && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalEditar(null)}>
+        <div className="modal-overlay">
           <div className="modal-box modal-box-wide">
             <div className="modal-header">
               <div><h3>✏️ Editar Empleado</h3><p>{modalEditar.nombres} {modalEditar.apellidos} — {modalEditar.numeroDi}</p></div>
@@ -799,8 +981,8 @@ export default function GestionEmpleados() {
               <form id="form-editar" onSubmit={handleGuardarEdicion}>
                 <div className="form-grid">
                   <div className="form-group">
-                    <label>Cargo</label>
-                    <input value={modalEditar.cargo ?? ""} onChange={e => setModalEditar({ ...modalEditar, cargo: e.target.value })} />
+                    <label>Cargo actual</label>
+                    <input value={modalEditar.cargo ?? ""} disabled />
                   </div>
                   <div className="form-group">
                     <label>Tipo de Contrato</label>
@@ -813,10 +995,9 @@ export default function GestionEmpleados() {
                   </div>
                   <div className="form-group">
                     <label>Sueldo Base (S/)</label>
-                    <button type="button" className="sueldo-detalle-btn" onClick={abrirSueldoDetalle}>
-                      <span className="sueldo-detalle-valor">{formatSueldo(modalEditar.sueldo)}</span>
-                      <span className="sueldo-detalle-hint">Ver estructura salarial →</span>
-                    </button>
+                    <input type="number" step="0.01" min="0" placeholder="0.00"
+                      value={modalEditar.sueldo ?? ""}
+                      onChange={e => setModalEditar({ ...modalEditar, sueldo: e.target.value })} />
                   </div>
                   <div className="form-group">
                     <label>Departamento</label>
@@ -896,7 +1077,7 @@ export default function GestionEmpleados() {
 
       {/* ══ MODAL: SANCIÓN ══ */}
       {modalSancion.open && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalSancion({ open: false, id: null })}>
+        <div className="modal-overlay">
           <div className="modal-box">
             <div className="modal-header">
               <div><h3>⚠️ Registrar Sanción</h3><p>Empleado #{modalSancion.id}</p></div>
@@ -938,310 +1119,244 @@ export default function GestionEmpleados() {
         </div>
       )}
 
-      {/* ══ MODAL: ASCENSO ══ */}
+      {/* ══ MODAL: CAMBIO DE CARGO/ROL ══ */}
       {modalAscenso.open && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalAscenso({ open: false, id: null })}>
+        <div className="modal-overlay">
           <div className="modal-box">
             <div className="modal-header">
-              <div><h3>↑ Registrar Ascenso</h3><p>Empleado #{modalAscenso.id}</p></div>
+              <div><h3>Cambio de cargo/rol</h3><p>{empleadoAscenso ? `${empleadoAscenso.nombres} ${empleadoAscenso.apellidos}` : `Empleado #${modalAscenso.id}`}</p></div>
               <button className="modal-close" onClick={() => setModalAscenso({ open: false, id: null })}>×</button>
             </div>
             <div className="modal-body">
+              {bloqueoRrhhSobreRrhh && (
+                <div className="alert alert-warning">Un usuario RRHH no puede modificar el cargo o rol de otro usuario RRHH.</div>
+              )}
               <form id="form-ascenso" onSubmit={handleAscenso}>
                 <div className="form-group">
                   <label>Nuevo Cargo</label>
                   <input value={ascensoForm.nuevoCargo}
                     onChange={e => setAscensoForm({ ...ascensoForm, nuevoCargo: e.target.value })}
-                    placeholder="Ej: Jefe de Área, Especialista..." />
+                    placeholder={empleadoAscenso?.cargo || "Ej: Jefe de Área, Especialista..."}
+                    disabled={bloqueoRrhhSobreRrhh} />
+                </div>
+                <div className="form-group">
+                  <label>Nuevo Rol</label>
+                  <select value={ascensoForm.nuevoRol} required
+                    onChange={e => setAscensoForm({ ...ascensoForm, nuevoRol: e.target.value })}
+                    disabled={esAutoCambioRol || bloqueoRrhhSobreRrhh}>
+                    <option value="">Seleccione un rol</option>
+                    <option value="EMPLEADO">Empleado</option>
+                    <option value="RRHH">RRHH</option>
+                    <option value="GERENCIA">Gerencia</option>
+                  </select>
                 </div>
               </form>
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setModalAscenso({ open: false, id: null })}>Cancelar</button>
-              <button className="btn btn-primary" type="submit" form="form-ascenso">↑ Registrar Ascenso</button>
+              <button className="btn btn-primary" type="submit" form="form-ascenso" disabled={bloqueoRrhhSobreRrhh}>Guardar cambio</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ══ MODAL: CAMBIO SALARIAL ══ */}
-      {modalCambio.open && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalCambio({ open: false, id: null })}>
-          <div className="modal-box">
+      {/* ══ MODAL: BENEFICIOS Y FAMILIA ══ */}
+      {modalBeneficios.open && (
+        <div className="modal-overlay">
+          <div className="modal-box modal-box-wide beneficios-modal">
             <div className="modal-header">
-              <div><h3>💲 Cambio Salarial</h3><p>Empleado #{modalCambio.id}</p></div>
-              <button className="modal-close" onClick={() => setModalCambio({ open: false, id: null })}>×</button>
+              <div>
+                <h3>🧾 Beneficios y familia</h3>
+                <p style={{ margin: 0, fontSize: 13, color: "var(--text-3)" }}>
+                  {modalBeneficios.empleado?.nombres} {modalBeneficios.empleado?.apellidos} · DNI {modalBeneficios.empleado?.numeroDi}
+                </p>
+              </div>
+              <button className="modal-close" onClick={() => setModalBeneficios({ open: false, empleado: null })}>×</button>
             </div>
             <div className="modal-body">
-              <form id="form-cambio" onSubmit={handleCambioSalarial}>
-                <div className="form-group">
-                  <label>Nuevo Sueldo (S/) *</label>
-                  <input type="number" step="0.01" min="0" value={cambioForm.nuevoSueldo}
-                    onChange={e => setCambioForm({ ...cambioForm, nuevoSueldo: e.target.value })}
-                    placeholder="0.00" required />
-                </div>
-              </form>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setModalCambio({ open: false, id: null })}>Cancelar</button>
-              <button className="btn btn-primary" type="submit" form="form-cambio">💾 Guardar Cambio</button>
-            </div>
-          </div>
-        </div>
-      )}
+              {beneficiosLoad ? (
+                <Spinner />
+              ) : (
+                <>
+                  <div className="alert alert-info">
+                    Estos datos alimentan el cálculo de nómina: régimen pensionario, descuento legal y asignación familiar por hijos validados.
+                  </div>
 
-      {/* ══ SUB-MODAL: ESTRUCTURA SALARIAL ══ */}
-      {modalSueldo && (sueldoModo === "nuevo" || modalEditar) && (() => {
-        const empleadoNombre = sueldoModo === "nuevo"
-          ? `${form.nombres || "—"} ${form.apellidos || ""}`.trim()
-          : `${modalEditar?.nombres ?? ""} ${modalEditar?.apellidos ?? ""}`.trim();
-        const empleadoCargo = sueldoModo === "nuevo" ? (form.cargo ?? "—") : (modalEditar?.cargo ?? "—");
-        const base      = parseFloat(sueldoForm.sueldoBase       || 0);
-        const bAsist    = parseFloat(sueldoForm.bonifAsistencia   || 0);
-        const bFam      = parseFloat(sueldoForm.bonifFamiliar     || 0);
-        const bExtra    = parseFloat(sueldoForm.bonifExtraordinaria || 0);
-        const bruto     = base + bAsist + bFam + bExtra;
-        const tasaPens  = sueldoForm.sistemaPensionario === "ONP" ? 0.13 : 0.1317;
-        const descPens  = bruto * tasaPens;
-        const descTard  = parseFloat(sueldoForm.descuentoTardanza || 0);
-        const descOtros = parseFloat(sueldoForm.otrosDescuentos   || 0);
-        const totalDesc = descPens + descTard + descOtros;
-        const neto      = bruto - totalDesc;
-        const fmt       = (n) => `S/ ${Number(n).toLocaleString("es-PE", { minimumFractionDigits: 2 })}`;
-        return (
-          <div className="modal-overlay" style={{ zIndex: 1100 }}
-            onClick={e => e.target === e.currentTarget && setModalSueldo(false)}>
-            <div className="modal-box modal-box-wide">
-              <div className="modal-header">
-                <div>
-                  <h3>💰 Estructura Salarial</h3>
-                  <p>{empleadoNombre || "Nuevo empleado"} — {empleadoCargo}</p>
-                </div>
-                <button className="modal-close" onClick={() => setModalSueldo(false)}>×</button>
-              </div>
-              <div className="modal-body">
-                <div className="sueldo-detalle-grid">
-
-                  {/* Columna izquierda: inputs */}
-                  <div className="sueldo-col">
-                    <p className="sueldo-section-title">Jornada</p>
-                    <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-                      <div className="form-group">
-                        <label>Horas semanales</label>
-                        <input type="number" min="0" value={sueldoForm.horasSemanales}
-                          onChange={e => setSueldoForm(f => ({ ...f, horasSemanales: e.target.value }))} />
-                      </div>
-                      <div className="form-group">
-                        <label>Horas extra</label>
-                        <input type="number" min="0" value={sueldoForm.horasExtra}
-                          onChange={e => setSueldoForm(f => ({ ...f, horasExtra: e.target.value }))} />
-                      </div>
+                  <section className="beneficios-section">
+                    <div className="beneficios-section-head">
+                      <h4>Perfil previsional y salud</h4>
+                      <button className="btn btn-primary btn-sm" onClick={guardarPerfilNomina} disabled={beneficiosSaving}>
+                        {beneficiosSaving ? "Guardando..." : "Guardar perfil"}
+                      </button>
                     </div>
-
-                    <p className="sueldo-section-title" style={{ marginTop: "14px" }}>Remuneración</p>
-                    <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                    <div className="form-grid">
                       <div className="form-group">
-                        <label>Sueldo Base (S/) *</label>
-                        <input type="number" step="0.01" min="0" value={sueldoForm.sueldoBase}
-                          onChange={e => setSueldoForm(f => ({ ...f, sueldoBase: e.target.value }))} autoFocus />
-                      </div>
-                      <div className="form-group">
-                        <label>Bonif. asistencia (S/)</label>
-                        <input type="number" step="0.01" min="0" value={sueldoForm.bonifAsistencia}
-                          onChange={e => setSueldoForm(f => ({ ...f, bonifAsistencia: e.target.value }))} />
-                      </div>
-                      <div className="form-group">
-                        <label>Bonif. familiar (S/)</label>
-                        <input type="number" step="0.01" min="0" value={sueldoForm.bonifFamiliar}
-                          onChange={e => setSueldoForm(f => ({ ...f, bonifFamiliar: e.target.value }))} />
-                      </div>
-                      <div className="form-group">
-                        <label>Bonif. extraordinaria (S/)</label>
-                        <input type="number" step="0.01" min="0" value={sueldoForm.bonifExtraordinaria}
-                          onChange={e => setSueldoForm(f => ({ ...f, bonifExtraordinaria: e.target.value }))} />
-                      </div>
-                    </div>
-
-                    <p className="sueldo-section-title" style={{ marginTop: "14px" }}>Descuentos</p>
-                    <div className="form-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-                      <div className="form-group">
-                        <label>Sistema pensionario</label>
-                        <select value={sueldoForm.sistemaPensionario}
-                          onChange={e => setSueldoForm(f => ({ ...f, sistemaPensionario: e.target.value }))}>
-                          <option value="AFP">AFP (~13.17%)</option>
-                          <option value="ONP">ONP (13%)</option>
+                        <label>Régimen de salud</label>
+                        <select value={perfilBeneficios.regimenSalud}
+                          onChange={e => setPerfilBeneficios({ ...perfilBeneficios, regimenSalud: e.target.value })}>
+                          <option value="ESSALUD">EsSalud</option>
+                          <option value="EPS">EPS</option>
+                          <option value="SIS">SIS</option>
                         </select>
                       </div>
                       <div className="form-group">
-                        <label>Desc. por tardanza (S/)</label>
-                        <input type="number" step="0.01" min="0" value={sueldoForm.descuentoTardanza}
-                          onChange={e => setSueldoForm(f => ({ ...f, descuentoTardanza: e.target.value }))} />
+                        <label>Régimen pensionario</label>
+                        <select value={perfilBeneficios.regimenPension}
+                          onChange={e => setPerfilBeneficios({ ...perfilBeneficios, regimenPension: e.target.value })}>
+                          <option value="ONP">ONP</option>
+                          <option value="AFP">AFP</option>
+                        </select>
+                      </div>
+                      {perfilBeneficios.regimenPension === "AFP" && (
+                        <>
+                          <div className="form-group">
+                            <label>AFP</label>
+                            <input value={perfilBeneficios.afp}
+                              onChange={e => setPerfilBeneficios({ ...perfilBeneficios, afp: e.target.value })}
+                              placeholder="Integra, Prima, Profuturo..." />
+                          </div>
+                          <div className="form-group">
+                            <label>CUSPP</label>
+                            <input value={perfilBeneficios.cuspp}
+                              onChange={e => setPerfilBeneficios({ ...perfilBeneficios, cuspp: e.target.value })}
+                              placeholder="Código CUSPP" />
+                          </div>
+                          <div className="form-group">
+                            <label>Tipo de comisión</label>
+                            <select value={perfilBeneficios.tipoComisionAfp}
+                              onChange={e => setPerfilBeneficios({ ...perfilBeneficios, tipoComisionAfp: e.target.value })}>
+                              <option value="">Seleccione</option>
+                              <option value="FLUJO">Flujo</option>
+                              <option value="MIXTA">Mixta</option>
+                            </select>
+                          </div>
+                        </>
+                      )}
+                      <div className="form-group">
+                        <label>Contacto de emergencia</label>
+                        <input value={perfilBeneficios.contactoEmergencia}
+                          onChange={e => setPerfilBeneficios({ ...perfilBeneficios, contactoEmergencia: e.target.value })}
+                          placeholder="Nombre completo" />
                       </div>
                       <div className="form-group">
-                        <label>Otros descuentos (S/)</label>
-                        <input type="number" step="0.01" min="0" value={sueldoForm.otrosDescuentos}
-                          onChange={e => setSueldoForm(f => ({ ...f, otrosDescuentos: e.target.value }))} />
+                        <label>Teléfono de emergencia</label>
+                        <input value={perfilBeneficios.telefonoEmergencia}
+                          onChange={e => setPerfilBeneficios({ ...perfilBeneficios, telefonoEmergencia: e.target.value })}
+                          placeholder="999 999 999" />
                       </div>
                     </div>
-                  </div>
+                  </section>
 
-                  {/* Columna derecha: resumen */}
-                  <div className="sueldo-resumen">
-                    <p className="sueldo-section-title">Resumen</p>
-                    <div className="sueldo-resumen-row">
-                      <span>Sueldo base</span><span>{fmt(base)}</span>
+                  <section className="beneficios-section">
+                    <div className="beneficios-section-head">
+                      <h4>Carga familiar y cobertura</h4>
+                      <span className="badge badge-info" style={{ fontSize: 11 }}>
+                        {familiares.filter(f => f.parentesco === "HIJO" && f.elegibleAsignacionFamiliar && f.validado).length} hijo(s) con asignación familiar
+                      </span>
                     </div>
-                    <div className="sueldo-resumen-row">
-                      <span>Bonificaciones</span><span>+ {fmt(bAsist + bFam + bExtra)}</span>
-                    </div>
-                    <div className="sueldo-resumen-row sueldo-resumen-subtotal">
-                      <span>Total bruto</span><span>{fmt(bruto)}</span>
-                    </div>
-                    <div className="sueldo-resumen-row sueldo-resumen-neg">
-                      <span>{sueldoForm.sistemaPensionario} ({sueldoForm.sistemaPensionario === "ONP" ? "13%" : "13.17%"})</span>
-                      <span>− {fmt(descPens)}</span>
-                    </div>
-                    <div className="sueldo-resumen-row sueldo-resumen-neg">
-                      <span>Tardanza / otros</span><span>− {fmt(descTard + descOtros)}</span>
-                    </div>
-                    <div className="sueldo-resumen-row sueldo-resumen-neto">
-                      <span>Neto a pagar</span><span>{fmt(neto)}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button className="btn btn-secondary" onClick={() => setModalSueldo(false)}>Cancelar</button>
-                <button className="btn btn-success" onClick={aplicarCambioSueldo}>✅ Aplicar sueldo base</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
-      {/* ══ MODAL: ASIGNAR HORARIO ══ */}
-      {modalHorario.open && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalHorario(m => ({ ...m, open: false }))}>
-          <div className="modal-box modal-box-wide">
-            <div className="modal-header">
-              <div>
-                <h3>📅 Horario — {modalHorario.empleado?.nombres} {modalHorario.empleado?.apellidos}</h3>
-                <p style={{ margin: 0, fontSize: 13, color: "var(--text-3)" }}>
-                  DNI: {modalHorario.empleado?.numeroDi} · {modalHorario.empleado?.cargo ?? "—"}
-                </p>
-              </div>
-              <button className="modal-close" onClick={() => setModalHorario(m => ({ ...m, open: false }))}>×</button>
-            </div>
+                    <form onSubmit={guardarFamiliar} className="beneficios-family-form">
+                      <div className="form-grid">
+                        <div className="form-group">
+                          <label>Nombres *</label>
+                          <input value={familiarForm.nombres}
+                            onChange={e => setFamiliarForm({ ...familiarForm, nombres: e.target.value })}
+                            required />
+                        </div>
+                        <div className="form-group">
+                          <label>Apellidos</label>
+                          <input value={familiarForm.apellidos}
+                            onChange={e => setFamiliarForm({ ...familiarForm, apellidos: e.target.value })} />
+                        </div>
+                        <div className="form-group">
+                          <label>Parentesco</label>
+                          <select value={familiarForm.parentesco}
+                            onChange={e => setFamiliarForm({ ...familiarForm, parentesco: e.target.value })}>
+                            <option value="HIJO">Hijo/a</option>
+                            <option value="CONYUGE">Cónyuge</option>
+                            <option value="CONVIVIENTE">Conviviente</option>
+                            <option value="PADRE">Padre/Madre</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label>Documento</label>
+                          <input value={familiarForm.numeroDi}
+                            onChange={e => setFamiliarForm({ ...familiarForm, numeroDi: e.target.value })} />
+                        </div>
+                        <div className="form-group">
+                          <label>Fecha de nacimiento *</label>
+                          <input type="date" value={familiarForm.fechaNacimiento}
+                            onChange={e => setFamiliarForm({ ...familiarForm, fechaNacimiento: e.target.value })}
+                            required />
+                        </div>
+                        <div className="beneficios-checks">
+                          <label><input type="checkbox" checked={familiarForm.esDerechohabiente}
+                            onChange={e => setFamiliarForm({ ...familiarForm, esDerechohabiente: e.target.checked })} /> Incluir en cobertura de salud</label>
+                          <label><input type="checkbox" checked={familiarForm.elegibleAsignacionFamiliar}
+                            onChange={e => setFamiliarForm({ ...familiarForm, elegibleAsignacionFamiliar: e.target.checked })} /> Considerar para asignación familiar</label>
+                          <label><input type="checkbox" checked={familiarForm.validado}
+                            onChange={e => setFamiliarForm({ ...familiarForm, validado: e.target.checked })} /> Documentación validada</label>
+                          <p className="beneficios-checks-help">
+                            La asignación familiar solo impacta nómina cuando el familiar elegible tiene documentación validada.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="form-actions">
+                        <button className="btn btn-success" type="submit" disabled={beneficiosSaving}>
+                          {editFamiliarId ? "Actualizar familiar" : "Agregar familiar"}
+                        </button>
+                        {editFamiliarId && (
+                          <button type="button" className="btn btn-secondary"
+                            onClick={() => { setEditFamiliarId(null); setFamiliarForm(FAMILIAR_VACIO); }}>
+                            Cancelar edición
+                          </button>
+                        )}
+                      </div>
+                    </form>
 
-            <div className="modal-body">
-              {/* ── Formulario de nueva asignación ── */}
-              <p style={{ fontWeight: 600, fontSize: 13, margin: "0 0 10px", color: "var(--text-1)" }}>
-                Nueva asignación
-              </p>
-              <form id="form-horario" onSubmit={handleAsignarHorario}>
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label>Turno *</label>
-                    <select
-                      value={horarioForm.idHorario}
-                      onChange={e => setHorarioForm(f => ({ ...f, idHorario: e.target.value }))}
-                      required
-                    >
-                      <option value="">Seleccione turno</option>
-                      {horarios.map(h => (
-                        <option key={h.idHorario} value={h.idHorario}>
-                          {h.nombreTurno} ({h.horaEntrada?.slice(0,5)} – {h.horaSalida?.slice(0,5)})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label>Desde *</label>
-                    <input
-                      type="date"
-                      value={horarioForm.fechaDesde}
-                      onChange={e => setHorarioForm(f => ({ ...f, fechaDesde: e.target.value }))}
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Hasta <span style={{ color: "var(--text-3)", fontWeight: 400 }}>(opcional)</span></label>
-                    <input
-                      type="date"
-                      value={horarioForm.fechaHasta}
-                      onChange={e => setHorarioForm(f => ({ ...f, fechaHasta: e.target.value }))}
-                      min={horarioForm.fechaDesde || undefined}
-                    />
-                  </div>
-                  <div className="form-group" style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 24 }}>
-                    <input
-                      type="checkbox"
-                      id="esTemporal"
-                      checked={horarioForm.esTemporal}
-                      onChange={e => setHorarioForm(f => ({ ...f, esTemporal: e.target.checked }))}
-                      style={{ width: 16, height: 16, cursor: "pointer" }}
-                    />
-                    <label htmlFor="esTemporal" style={{ margin: 0, cursor: "pointer", fontWeight: 500 }}>
-                      Asignación temporal
-                    </label>
-                  </div>
-                </div>
-              </form>
-
-              {/* ── Historial de asignaciones ── */}
-              <p style={{ fontWeight: 600, fontSize: 13, margin: "18px 0 10px", color: "var(--text-1)" }}>
-                Historial de asignaciones
-              </p>
-              {modalHorario.loading ? (
-                <div className="loading-text">Cargando...</div>
-              ) : modalHorario.asignaciones.length === 0 ? (
-                <div className="empty-state" style={{ padding: "16px 0" }}>
-                  <div className="empty-state-icon">📅</div>
-                  <p>Sin asignaciones de horario registradas.</p>
-                </div>
-              ) : (
-                <div className="table-wrapper" style={{ maxHeight: 260, overflowY: "auto" }}>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Turno</th>
-                        <th>Horario</th>
-                        <th>Desde</th>
-                        <th>Hasta</th>
-                        <th style={{ textAlign: "center" }}>Temporal</th>
-                        <th style={{ textAlign: "center" }}>Estado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {modalHorario.asignaciones.map(a => (
-                        <tr key={a.idAsignacion}>
-                          <td style={{ fontWeight: 600 }}>{a.nombreTurno}</td>
-                          <td style={{ fontSize: 12, color: "var(--text-2)" }}>
-                            {a.horaEntrada?.slice(0,5)} – {a.horaSalida?.slice(0,5)}
-                          </td>
-                          <td style={{ fontSize: 12 }}>{a.fechaDesde ?? "—"}</td>
-                          <td style={{ fontSize: 12 }}>{a.fechaHasta ?? "Indefinido"}</td>
-                          <td style={{ textAlign: "center", fontSize: 12 }}>{a.esTemporal ? "Sí" : "No"}</td>
-                          <td style={{ textAlign: "center" }}>
-                            <span className={`emp-status-dot ${a.activo ? "emp-status-active" : "emp-status-inactive"}`}>
-                              {a.activo ? "Activo" : "Inactivo"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    <div className="table-wrapper beneficios-table">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Familiar</th>
+                            <th>Parentesco</th>
+                            <th>Documento</th>
+                            <th>Nacimiento</th>
+                            <th>Nómina</th>
+                            <th>Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {familiares.length === 0 ? (
+                            <tr><td colSpan={6}><div className="empty-state"><p>No hay familiares registrados.</p></div></td></tr>
+                          ) : familiares.map(f => (
+                            <tr key={f.id}>
+                              <td>{f.nombres} {f.apellidos}</td>
+                              <td>{f.parentesco}</td>
+                              <td>{f.numeroDi || "—"}</td>
+                              <td>{f.fechaNacimiento || "—"}</td>
+                              <td>
+                                <span className={`badge ${f.elegibleAsignacionFamiliar && f.validado ? "badge-success" : "badge-gray"}`}>
+                                  {f.elegibleAsignacionFamiliar && f.validado ? "Aplica" : "No aplica"}
+                                </span>
+                              </td>
+                              <td>
+                                <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                                  <button className="btn btn-secondary btn-sm" onClick={() => editarFamiliar(f)}>Editar</button>
+                                  <button className="btn btn-danger btn-sm" onClick={() => quitarFamiliar(f.id)}>Retirar</button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                </>
               )}
             </div>
-
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setModalHorario(m => ({ ...m, open: false }))}>
-                Cerrar
-              </button>
-              <button className="btn btn-success" type="submit" form="form-horario">
-                📅 Asignar turno
-              </button>
+              <button className="btn btn-secondary" onClick={() => setModalBeneficios({ open: false, empleado: null })}>Cerrar</button>
             </div>
           </div>
         </div>
@@ -1249,7 +1364,7 @@ export default function GestionEmpleados() {
 
       {/* ══ MODAL: HISTORIAL DEL EMPLEADO ══ */}
       {modalHistorial.open && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModalHistorial({ open: false, empleado: null })}>
+        <div className="modal-overlay">
           <div className="modal-box modal-box-wide">
             <div className="modal-header">
               <div>
@@ -1262,7 +1377,7 @@ export default function GestionEmpleados() {
             </div>
             <div className="modal-body">
               {historialLoad ? (
-                <div className="loading-text">Cargando historial...</div>
+                <Spinner />
               ) : historialData.length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-state-icon">📋</div>
@@ -1297,15 +1412,11 @@ export default function GestionEmpleados() {
                               {h.accion ?? "—"}
                             </span>
                           </td>
-                          <td style={{ fontSize: 12, color: "var(--text-2)", maxWidth: 220 }}>
-                            <span title={h.valorAnterior ?? ""} style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {h.valorAnterior ?? "—"}
-                            </span>
+                          <td style={{ fontSize: 12, color: "var(--text-2)", maxWidth: 180 }}>
+                            <ValorHistorial valor={h.valorAnterior} muted />
                           </td>
-                          <td style={{ fontSize: 12, color: "var(--text-1)", maxWidth: 280 }}>
-                            <span title={h.valorNuevo ?? ""} style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {h.valorNuevo ?? "—"}
-                            </span>
+                          <td style={{ fontSize: 12, color: "var(--text-1)", maxWidth: 300 }}>
+                            <ValorHistorial valor={h.valorNuevo} />
                           </td>
                         </tr>
                       ))}

@@ -21,4 +21,8 @@ public interface INominaRepository {
     boolean existePorEmpleadoYPeriodo(Long idEmpleado, String periodo);
 
     List<Nomina> buscarPorNombreEmpleado(String nombre);
+
+    void eliminar(Integer idNomina);
+
+    void eliminarPorPeriodo(String periodo);
 }

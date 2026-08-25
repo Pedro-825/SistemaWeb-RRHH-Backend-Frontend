@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "RRHH Backend (Local)",
+            "request": "launch",
+            "mainClass": "com.rrhh.SistemaRrhhApplication",
+            "projectName": "sistema-rrhh",
+            "envFile": "${workspaceFolder}/backend/RRHH/src/main/resources/.env",
+            "cwd": "${workspaceFolder}/backend/RRHH"
+        }
+    ]
+}

@@ -47,7 +47,9 @@ EmpleadoResponseDTO reactivarEmpleado(
 );
 EmpleadoResponseDTO registrarAscenso(
         Long idEmpleado,
-        RegistrarAscensoRequestDTO dto
+        RegistrarAscensoRequestDTO dto,
+        Long idEmpleadoActor,
+        String rolActor
 );
 EmpleadoResponseDTO registrarCambioSalarial(
         Long idEmpleado,

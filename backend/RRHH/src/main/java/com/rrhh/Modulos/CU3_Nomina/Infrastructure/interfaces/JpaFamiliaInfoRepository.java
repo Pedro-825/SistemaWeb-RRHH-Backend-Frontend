@@ -8,5 +8,7 @@ import java.util.List;
 public interface JpaFamiliaInfoRepository extends JpaRepository<FamiliaInfoModel, Integer> {
  
     List<FamiliaInfoModel> findByEmpleadoIdEmpleadoAndActivoTrue(Long idEmpleado);
+
+    List<FamiliaInfoModel> findByEmpleadoIdEmpleadoInAndActivoTrue(List<Long> idsEmpleados);
 }
  

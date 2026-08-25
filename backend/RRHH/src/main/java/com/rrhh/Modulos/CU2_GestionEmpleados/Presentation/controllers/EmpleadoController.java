@@ -13,7 +13,13 @@ import com.rrhh.Modulos.CU2_GestionEmpleados.Application.dto.RegistrarSancionReq
 import com.rrhh.Modulos.CU2_GestionEmpleados.Application.services.IEmpleadoService;
 import com.rrhh.Modulos.CU2_GestionEmpleados.Presentation.routes.EmpleadoApiRoutes;
 import com.rrhh.Modulos.CU1_AutenticacionYRol.Infrastructure.interfaces.JpaHistorialRepository;
+import com.rrhh.Modulos.CU1_AutenticacionYRol.Infrastructure.interfaces.JpaUsuarioRepository;
+import com.rrhh.Modulos.CU1_AutenticacionYRol.Infrastructure.services.EmailService;
+import com.rrhh.Modulos.CU2_GestionEmpleados.Infrastructure.interfaces.JpaEmpleadoRepository;
+import com.rrhh.Shared.persistence.EmpleadoModel;
 import com.rrhh.Shared.persistence.HistorialAuditoriaModel;
+import com.rrhh.Shared.persistence.UsuarioModel;
+import com.rrhh.config.security.AuthenticatedUser;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -21,6 +27,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
@@ -35,18 +42,30 @@ public class EmpleadoController {
 
     private final IEmpleadoService empleadoService;
     private final JpaHistorialRepository historialRepository;
+    private final EmailService emailService;
+    private final JpaEmpleadoRepository jpaEmpleadoRepository;
+    private final JpaUsuarioRepository jpaUsuarioRepository;
 
-    public EmpleadoController(IEmpleadoService empleadoService, JpaHistorialRepository historialRepository) {
+    public EmpleadoController(IEmpleadoService empleadoService, JpaHistorialRepository historialRepository,
+                              EmailService emailService, JpaEmpleadoRepository jpaEmpleadoRepository,
+                              JpaUsuarioRepository jpaUsuarioRepository) {
         this.empleadoService = empleadoService;
         this.historialRepository = historialRepository;
+        this.emailService = emailService;
+        this.jpaEmpleadoRepository = jpaEmpleadoRepository;
+        this.jpaUsuarioRepository = jpaUsuarioRepository;
+    }
+
+    private ResponseEntity<EmpleadoResponseDTO> responder(EmpleadoResponseDTO dto) {
+        return dto.isSuccess() ? ResponseEntity.ok(dto) : ResponseEntity.badRequest().body(dto);
     }
 
     @PostMapping(EmpleadoApiRoutes.REGISTRAR)
     @PreAuthorize("hasRole('RRHH')")
-    public EmpleadoResponseDTO registrarEmpleado(
+    public ResponseEntity<EmpleadoResponseDTO> registrarEmpleado(
             @Valid @RequestBody RegistrarEmpleadoRequestDTO dto
     ) {
-        return empleadoService.registrarEmpleado(dto);
+        return responder(empleadoService.registrarEmpleado(dto));
     }
 
     @GetMapping(EmpleadoApiRoutes.LISTAR)
@@ -84,65 +103,105 @@ public class EmpleadoController {
 
     @PutMapping(EmpleadoApiRoutes.ACTUALIZAR)
     @PreAuthorize("hasRole('RRHH')")
-    public EmpleadoResponseDTO actualizarEmpleado(
+    public ResponseEntity<EmpleadoResponseDTO> actualizarEmpleado(
             @PathVariable Long idEmpleado,
             @Valid @RequestBody ActualizarEmpleadoRequestDTO dto
     ) {
-        return empleadoService.actualizarEmpleado(idEmpleado, dto);
+        return responder(empleadoService.actualizarEmpleado(idEmpleado, dto));
     }
 
     @PutMapping(EmpleadoApiRoutes.DESACTIVAR)
     @PreAuthorize("hasRole('RRHH')")
-    public EmpleadoResponseDTO desactivarEmpleado(
+    public ResponseEntity<EmpleadoResponseDTO> desactivarEmpleado(
             @PathVariable Long idEmpleado,
             @RequestBody DesactivarEmpleadoRequestDTO dto
     ) {
-        return empleadoService.desactivarEmpleado(idEmpleado, dto);
+        return responder(empleadoService.desactivarEmpleado(idEmpleado, dto));
     }
 
     @PutMapping(EmpleadoApiRoutes.SANCION)
     @PreAuthorize("hasRole('RRHH')")
-    public EmpleadoResponseDTO registrarSancion(
+    public ResponseEntity<EmpleadoResponseDTO> registrarSancion(
             @PathVariable Long idEmpleado,
             @Valid @RequestBody RegistrarSancionRequestDTO dto
     ) {
-        return empleadoService.registrarSancion(idEmpleado, dto);
+        return responder(empleadoService.registrarSancion(idEmpleado, dto));
     }
 
     @PutMapping(EmpleadoApiRoutes.REACTIVAR)
     @PreAuthorize("hasRole('RRHH')")
-    public EmpleadoResponseDTO reactivarEmpleado(
+    public ResponseEntity<EmpleadoResponseDTO> reactivarEmpleado(
             @PathVariable Long idEmpleado,
             @RequestBody ReactivarEmpleadoRequestDTO dto
     ) {
-        return empleadoService.reactivarEmpleado(idEmpleado, dto);
+        return responder(empleadoService.reactivarEmpleado(idEmpleado, dto));
     }
 
     @PutMapping(EmpleadoApiRoutes.ASCENSO)
     @PreAuthorize("hasRole('RRHH')")
-    public EmpleadoResponseDTO registrarAscenso(
+    public ResponseEntity<EmpleadoResponseDTO> registrarAscenso(
             @PathVariable Long idEmpleado,
-            @RequestBody RegistrarAscensoRequestDTO dto
+            @RequestBody RegistrarAscensoRequestDTO dto,
+            @AuthenticationPrincipal AuthenticatedUser usuarioActual
     ) {
-        return empleadoService.registrarAscenso(idEmpleado, dto);
+        Long idEmpleadoActor = usuarioActual != null ? usuarioActual.getIdEmpleado() : null;
+        String rolActor = usuarioActual != null ? usuarioActual.getRol() : null;
+        return responder(empleadoService.registrarAscenso(idEmpleado, dto, idEmpleadoActor, rolActor));
     }
 
     @PutMapping(EmpleadoApiRoutes.CAMBIO_SALARIAL)
     @PreAuthorize("hasRole('RRHH')")
-    public EmpleadoResponseDTO registrarCambioSalarial(
+    public ResponseEntity<EmpleadoResponseDTO> registrarCambioSalarial(
             @PathVariable Long idEmpleado,
             @RequestBody CambioSalarialRequestDTO dto
     ) {
-        return empleadoService.registrarCambioSalarial(idEmpleado, dto);
+        return responder(empleadoService.registrarCambioSalarial(idEmpleado, dto));
+    }
+
+    @PostMapping("/{idEmpleado}/enviar-app")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Map<String, String>> enviarLinkApp(@PathVariable Long idEmpleado) {
+        EmpleadoModel empleado = jpaEmpleadoRepository.findById(java.util.Objects.requireNonNull(idEmpleado))
+                .orElseThrow(() -> new IllegalArgumentException("Empleado no encontrado"));
+        if (empleado.getCorreo() == null || empleado.getCorreo().isBlank()) {
+            return ResponseEntity.badRequest()
+                    .body(Map.of("message", "El empleado no tiene correo registrado."));
+        }
+        try {
+            emailService.enviarLinkDescargaApp(
+                    empleado.getCorreo(),
+                    empleado.getNombres() + " " + empleado.getApellidos()
+            );
+            return ResponseEntity.ok(Map.of("message", "Enlace enviado correctamente."));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("message", "No se pudo enviar el correo."));
+        }
+    }
+
+    @PostMapping("/{idEmpleado}/confirmar-app")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Map<String, String>> confirmarAppInstalada(@PathVariable Long idEmpleado) {
+        UsuarioModel usuario = jpaUsuarioRepository.findByEmpleadoIdEmpleado(idEmpleado).orElse(null);
+        if (usuario == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Usuario no encontrado."));
+        }
+        usuario.setAppMovilInstalada(true);
+        jpaUsuarioRepository.save(usuario);
+        return ResponseEntity.ok(Map.of("message", "App confirmada."));
     }
 
     @GetMapping(EmpleadoApiRoutes.HISTORIAL)
     @PreAuthorize("hasAnyRole('RRHH', 'GERENCIA')")
     public ResponseEntity<List<Map<String, Object>>> getHistorialEmpleado(
             @PathVariable Long idEmpleado) {
+        // AuditoriaEmpleadoService registra los cambios del empleado bajo distintos
+        // "tablaAfectada" segun que se modifico (perfil, familiares, horario, etc.),
+        // no solo "EMPLEADO". Hay que incluirlos todos para que el historial este completo.
         List<HistorialAuditoriaModel> historial = historialRepository
-                .findByIdRegistroAfectadoAndTablaAfectada(
-                        idEmpleado, "EMPLEADO",
+                .findByIdRegistroAfectadoAndTablaAfectadaIn(
+                        idEmpleado,
+                        List.of("EMPLEADO", "EMPLEADO_DERECHO_HABIENTES", "FAMILIA_INFO", "ASIGNACION_HORARIO"),
                         Sort.by(Sort.Direction.DESC, "fechaDeCambio"));
         List<Map<String, Object>> result = historial.stream().map(h -> {
             Map<String, Object> m = new LinkedHashMap<>();

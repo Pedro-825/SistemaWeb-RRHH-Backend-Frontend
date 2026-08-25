@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Hospital San Gabriel",
+    "slug": "hospital-san-gabriel-asistencia",
+    "version": "1.0.2",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.hospitalsangabriel.asistencia"
+    },
+    "android": {
+      "versionCode": 4,
+      "package": "com.hospitalsangabriel.asistencia",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "9f56c6ed-6504-4b7e-994a-8cd49cd80dd5"
+      }
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}

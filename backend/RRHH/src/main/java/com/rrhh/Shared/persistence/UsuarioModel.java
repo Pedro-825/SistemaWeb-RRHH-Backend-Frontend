@@ -49,6 +49,9 @@ public class UsuarioModel {
     @Column(name = "activo")
     private Boolean activo = true;
 
+    @Column(name = "app_movil_instalada")
+    private Boolean appMovilInstalada = false;
+
     @Column(name = "creado_el", updatable = false)
     private LocalDateTime creadoEl = LocalDateTime.now();
 
@@ -216,6 +219,14 @@ public class UsuarioModel {
 
     public void setActivo(Boolean activo) {
         this.activo = activo;
+    }
+
+    public Boolean getAppMovilInstalada() {
+        return appMovilInstalada;
+    }
+
+    public void setAppMovilInstalada(Boolean appMovilInstalada) {
+        this.appMovilInstalada = appMovilInstalada;
     }
 
     public LocalDateTime getCreadoEl() {

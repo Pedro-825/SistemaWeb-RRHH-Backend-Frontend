@@ -3,6 +3,8 @@ package com.rrhh.Modulos.CU5_Reporte.Presentation.controllers;
 import com.rrhh.Modulos.CU5_Reporte.Application.dto.*;
 import com.rrhh.Modulos.CU5_Reporte.Application.services.IReporteService;
 import com.rrhh.Modulos.CU5_Reporte.Presentation.routes.ReporteApiRoutes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +16,10 @@ import com.rrhh.config.security.AuthenticatedUser;
 
 @RestController
 public class ReporteController {
+
+    private static final Logger log = LoggerFactory.getLogger(ReporteController.class);
+    private static final String ERROR_INTERNO_REPORTE =
+            "No se pudo generar el reporte. Verifique los filtros e intente nuevamente.";
 
     private final IReporteService reporteService;
 
@@ -38,6 +44,9 @@ public class ReporteController {
             return ResponseEntity.ok(dto);
         } catch (IllegalArgumentException | IllegalStateException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            log.error("Error generando reporte de empleados", e);
+            return ResponseEntity.internalServerError().body(ERROR_INTERNO_REPORTE);
         }
     }
 
@@ -58,6 +67,9 @@ public class ReporteController {
             return ResponseEntity.ok(dto);
         } catch (IllegalArgumentException | IllegalStateException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            log.error("Error generando reporte de asistencia", e);
+            return ResponseEntity.internalServerError().body(ERROR_INTERNO_REPORTE);
         }
     }
 
@@ -78,6 +90,9 @@ public class ReporteController {
             return ResponseEntity.ok(dto);
         } catch (IllegalArgumentException | IllegalStateException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            log.error("Error generando reporte de nomina", e);
+            return ResponseEntity.internalServerError().body(ERROR_INTERNO_REPORTE);
         }
     }
 
@@ -98,6 +113,9 @@ public class ReporteController {
             return ResponseEntity.ok(dto);
         } catch (IllegalArgumentException | IllegalStateException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            log.error("Error generando reporte de solicitudes", e);
+            return ResponseEntity.internalServerError().body(ERROR_INTERNO_REPORTE);
         }
     }
 

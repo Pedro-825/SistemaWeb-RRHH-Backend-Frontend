@@ -4,6 +4,10 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 
+import java.util.Objects;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -16,6 +20,12 @@ import java.util.List;
 public class JwtConfig {
 
     private final JwtProperties jwtProperties;
+
+    @Value("${cookie.secure:false}")
+    private boolean cookieSecure;
+
+    @Value("${cookie.same-site:Lax}")
+    private String cookieSameSite;
 
     private final long expirationTime = 1000 * 60 * 15;
 
@@ -36,6 +46,7 @@ public class JwtConfig {
             String username,
             String rol,
             Long idUsuario,
+            Long idEmpleado,
             List<String> permisos,
             LocalDateTime tokenInvalidoDesde
     ) {
@@ -44,6 +55,7 @@ public class JwtConfig {
                 .setSubject(username)
                 .claim("rol", rol)
                 .claim("idUsuario", idUsuario)
+                .claim("idEmpleado", idEmpleado)
                 .claim("permisos", permisos)
                 .claim("tokenInvalidoDesde", tokenInvalidoDesde != null ? tokenInvalidoDesde.toString() : null)
                 .setIssuedAt(new Date())
@@ -71,6 +83,16 @@ public class JwtConfig {
 
     public Long obtenerIdUsuario(String token) {
         Number id = obtenerClaims(token).get("idUsuario", Number.class);
+
+        if (id == null) {
+            return null;
+        }
+
+        return id.longValue();
+    }
+
+    public Long obtenerIdEmpleado(String token) {
+        Number id = obtenerClaims(token).get("idEmpleado", Number.class);
 
         if (id == null) {
             return null;
@@ -112,12 +134,34 @@ public class JwtConfig {
         String username = claims.getSubject();
         String rol = claims.get("rol", String.class);
         Number id = claims.get("idUsuario", Number.class);
+        Number idEmp = claims.get("idEmpleado", Number.class);
         List<String> permisos = obtenerPermisos(token);
         String inv = claims.get("tokenInvalidoDesde", String.class);
         LocalDateTime tokenInvalidoDesde = inv != null ? LocalDateTime.parse(inv) : null;
 
         Long idUsuario = id != null ? id.longValue() : null;
+        Long idEmpleado = idEmp != null ? idEmp.longValue() : null;
 
-        return generarToken(username, rol, idUsuario, permisos, tokenInvalidoDesde);
+        return generarToken(username, rol, idUsuario, idEmpleado, permisos, tokenInvalidoDesde);
+    }
+
+    public ResponseCookie crearCookieJwt(String token) {
+        return ResponseCookie.from("jwt", Objects.requireNonNull(token))
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/")
+                .maxAge(expirationTime / 1000)
+                .build();
+    }
+
+    public ResponseCookie crearCookieJwtVacia() {
+        return ResponseCookie.from("jwt", "")
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/")
+                .maxAge(0)
+                .build();
     }
 }

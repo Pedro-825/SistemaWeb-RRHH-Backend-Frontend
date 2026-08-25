@@ -8,6 +8,9 @@ public class FiltroAsistenciaDTO {
     private LocalDate fechaFin;
     private String area;
     private Long idEmpleado;
+    private String estado;
+    private String tipoRegistro;
+    private Integer minutosTardanzaMin;
 
     public FiltroAsistenciaDTO() {}
 
@@ -22,4 +25,13 @@ public class FiltroAsistenciaDTO {
 
     public Long getIdEmpleado() { return idEmpleado; }
     public void setIdEmpleado(Long idEmpleado) { this.idEmpleado = idEmpleado; }
+
+    public String getEstado() { return estado; }
+    public void setEstado(String estado) { this.estado = estado; }
+
+    public String getTipoRegistro() { return tipoRegistro; }
+    public void setTipoRegistro(String tipoRegistro) { this.tipoRegistro = tipoRegistro; }
+
+    public Integer getMinutosTardanzaMin() { return minutosTardanzaMin; }
+    public void setMinutosTardanzaMin(Integer minutosTardanzaMin) { this.minutosTardanzaMin = minutosTardanzaMin; }
 }

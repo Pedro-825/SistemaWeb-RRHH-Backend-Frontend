@@ -153,11 +153,15 @@ public class EmpleadoService implements IEmpleadoService {
     @Override
     public EmpleadoResponseDTO registrarAscenso(
             Long idEmpleado,
-            RegistrarAscensoRequestDTO dto
+            RegistrarAscensoRequestDTO dto,
+            Long idEmpleadoActor,
+            String rolActor
     ) {
         return registrarAscensoUseCase.ejecutar(
                 idEmpleado,
-                dto
+                dto,
+                idEmpleadoActor,
+                rolActor
         );
     }
 

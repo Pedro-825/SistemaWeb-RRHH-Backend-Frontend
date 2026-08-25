@@ -1,0 +1,1 @@
+ALTER TABLE nomina ADD COLUMN IF NOT EXISTS sueldo_contrato NUMERIC(10,2);

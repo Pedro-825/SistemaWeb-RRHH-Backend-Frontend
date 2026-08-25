@@ -25,6 +25,9 @@ public class FamiliaInfoModel {
     @Column(name = "nombres", nullable = false)
     private String nombres;
 
+    @Column(name = "apellidos")
+    private String apellidos;
+
     @Column(name = "parentesco", nullable = false)
     private String parentesco;
 
@@ -33,6 +36,21 @@ public class FamiliaInfoModel {
 
     @Column(name = "fecha_nacimiento", nullable = false)
     private LocalDate fechaNacimiento;
+
+    @Column(name = "es_derechohabiente")
+    private Boolean esDerechohabiente = false;
+
+    @Column(name = "elegible_asignacion_familiar")
+    private Boolean elegibleAsignacionFamiliar = false;
+
+    @Column(name = "cobertura_desde")
+    private LocalDate coberturaDesde;
+
+    @Column(name = "cobertura_hasta")
+    private LocalDate coberturaHasta;
+
+    @Column(name = "validado")
+    private Boolean validado = false;
 
     @Column(name = "activo")
     private Boolean activo = true;

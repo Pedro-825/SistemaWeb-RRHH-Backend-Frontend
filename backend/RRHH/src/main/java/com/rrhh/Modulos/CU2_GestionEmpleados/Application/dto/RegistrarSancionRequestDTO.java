@@ -1,77 +1,50 @@
 package com.rrhh.Modulos.CU2_GestionEmpleados.Application.dto;
 
-import java.time.LocalDate;
-
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 
 public class RegistrarSancionRequestDTO {
 
-    @NotBlank(message = "El motivo de la sancion es obligatorio")
-    private String motivo;
-    private String descripcion;
+    @NotBlank(message = "El tipo de sanción es obligatorio")
+    private String tipoSancion;
+    private Integer diasSuspension;
 
-    @NotNull(message = "La fecha de inicio es obligatoria")
-    private LocalDate fechaInicio;
-
-    @NotNull(message = "La fecha de fin es obligatoria")
-    private LocalDate fechaFin;
-    private Boolean bloquearAcceso;
+    @NotBlank(message = "La justificación es obligatoria")
+    private String justificacion;
 
     public RegistrarSancionRequestDTO() {
     }
 
     public RegistrarSancionRequestDTO(
-            String motivo,
-            String descripcion,
-            LocalDate fechaInicio,
-            LocalDate fechaFin,
-            Boolean bloquearAcceso
+            String tipoSancion,
+            Integer diasSuspension,
+            String justificacion
     ) {
-        this.motivo = motivo;
-        this.descripcion = descripcion;
-        this.fechaInicio = fechaInicio;
-        this.fechaFin = fechaFin;
-        this.bloquearAcceso = bloquearAcceso;
+        this.tipoSancion = tipoSancion;
+        this.diasSuspension = diasSuspension;
+        this.justificacion = justificacion;
     }
 
-    public String getMotivo() {
-        return motivo;
+    public String getTipoSancion() {
+        return tipoSancion;
     }
 
-    public void setMotivo(String motivo) {
-        this.motivo = motivo;
+    public void setTipoSancion(String tipoSancion) {
+        this.tipoSancion = tipoSancion;
     }
 
-    public String getDescripcion() {
-        return descripcion;
+    public Integer getDiasSuspension() {
+        return diasSuspension != null ? diasSuspension : 0;
     }
 
-    public void setDescripcion(String descripcion) {
-        this.descripcion = descripcion;
+    public void setDiasSuspension(Integer diasSuspension) {
+        this.diasSuspension = diasSuspension;
     }
 
-    public LocalDate getFechaInicio() {
-        return fechaInicio;
+    public String getJustificacion() {
+        return justificacion;
     }
 
-    public void setFechaInicio(LocalDate fechaInicio) {
-        this.fechaInicio = fechaInicio;
-    }
-
-    public LocalDate getFechaFin() {
-        return fechaFin;
-    }
-
-    public void setFechaFin(LocalDate fechaFin) {
-        this.fechaFin = fechaFin;
-    }
-
-    public Boolean getBloquearAcceso() {
-        return bloquearAcceso;
-    }
-
-    public void setBloquearAcceso(Boolean bloquearAcceso) {
-        this.bloquearAcceso = bloquearAcceso;
+    public void setJustificacion(String justificacion) {
+        this.justificacion = justificacion;
     }
 }

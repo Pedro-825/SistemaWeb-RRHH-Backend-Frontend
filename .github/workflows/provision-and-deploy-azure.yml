@@ -1,0 +1,147 @@
+name: Provision and deploy Azure
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'rg-rrhh-san-gabriel' }}
+  LOCATION: ${{ vars.AZURE_LOCATION || 'eastus' }}
+  STATIC_WEB_APP_LOCATION: ${{ vars.AZURE_STATIC_WEB_APP_LOCATION || 'eastus2' }}
+  NAME_PREFIX: ${{ vars.AZURE_NAME_PREFIX || 'rrhhsg' }}
+  BACKEND_DIR: backend/RRHH
+  FRONTEND_DIR: frontend/rrhh-frontend
+  JAVA_VERSION: '21'
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_app_name: ${{ steps.read_outputs.outputs.backend_app_name }}
+      backend_url: ${{ steps.read_outputs.outputs.backend_url }}
+      static_web_app_name: ${{ steps.read_outputs.outputs.static_web_app_name }}
+      frontend_url: ${{ steps.read_outputs.outputs.frontend_url }}
+      static_web_app_token: ${{ steps.static_token.outputs.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create resource group
+        run: |
+          az group create \
+            --name "$RESOURCE_GROUP" \
+            --location "$LOCATION"
+
+      - name: Deploy Azure infrastructure
+        id: deploy
+        uses: azure/bicep-deploy@v2
+        with:
+          type: deployment
+          operation: create
+          scope: resourceGroup
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resource-group-name: ${{ env.RESOURCE_GROUP }}
+          name: rrhh-${{ github.run_number }}
+          template-file: infra/main.bicep
+          parameters: |
+            namePrefix=${{ env.NAME_PREFIX }}
+            location=${{ env.LOCATION }}
+            staticWebAppLocation=${{ env.STATIC_WEB_APP_LOCATION }}
+            postgresAdminLogin=${{ vars.POSTGRES_ADMIN_LOGIN || 'rrhhadmin' }}
+            postgresAdminPassword=${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+            jwtSecret=${{ secrets.JWT_SECRET }}
+            mailUsername=${{ vars.MAIL_USERNAME }}
+            mailPassword=${{ secrets.MAIL_PASSWORD }}
+
+      - name: Read deployment outputs
+        id: read_outputs
+        run: |
+          outputs=$(az deployment group show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "rrhh-${{ github.run_number }}" \
+            --query properties.outputs)
+
+          backend_app_name=$(echo "$outputs" | jq -r '.backendAppName.value')
+          backend_url=$(echo "$outputs" | jq -r '.backendUrl.value')
+          static_web_app_name=$(echo "$outputs" | jq -r '.staticWebAppName.value')
+          frontend_url=$(echo "$outputs" | jq -r '.frontendUrl.value')
+
+          echo "backend_app_name=$backend_app_name" >> "$GITHUB_OUTPUT"
+          echo "backend_url=$backend_url" >> "$GITHUB_OUTPUT"
+          echo "static_web_app_name=$static_web_app_name" >> "$GITHUB_OUTPUT"
+          echo "frontend_url=$frontend_url" >> "$GITHUB_OUTPUT"
+
+      - name: Read Static Web Apps deployment token
+        id: static_token
+        run: |
+          token=$(az staticwebapp secrets list \
+            --name "${{ steps.read_outputs.outputs.static_web_app_name }}" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "properties.apiKey" \
+            --output tsv)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    needs: provision
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Build Spring Boot jar
+        working-directory: ${{ env.BACKEND_DIR }}
+        run: mvn -B clean package -DskipTests
+
+      - name: Deploy backend jar
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ needs.provision.outputs.backend_app_name }}
+          package: '${{ env.BACKEND_DIR }}/target/*.jar'
+
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    needs:
+      - provision
+      - deploy-backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy frontend
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ needs.provision.outputs.static_web_app_token }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: ${{ env.FRONTEND_DIR }}
+          output_location: dist
+        env:
+          VITE_API_URL: ${{ needs.provision.outputs.backend_url }}

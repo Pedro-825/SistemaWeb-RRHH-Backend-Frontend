@@ -160,7 +160,10 @@ public class BuscarEmpleadoUseCase {
                 usuario != null ? usuario.getNombreUsuario() : null,
                 usuario != null ? usuario.getCorreoInst() : null,
                 contrato != null ? contrato.getSueldo() : null,
-                contrato != null ? contrato.getFechaInicio() : null
+                contrato != null ? contrato.getFechaInicio() : null,
+                contrato != null ? contrato.getTipoContrato() : null,
+                contrato != null ? contrato.getIdDpto() : null,
+                empleado.getDireccion()
         );
     }
 }

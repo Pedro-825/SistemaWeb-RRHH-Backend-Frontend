@@ -11,6 +11,9 @@ public class FiltroNominaDTO {
     private Long idEmpleado;
     private BigDecimal salarioMin;
     private BigDecimal salarioMax;
+    private String estadoPago;
+    private BigDecimal horasExtraMin;
+    private BigDecimal horasExtraMax;
 
     public FiltroNominaDTO() {}
 
@@ -31,4 +34,13 @@ public class FiltroNominaDTO {
 
     public BigDecimal getSalarioMax() { return salarioMax; }
     public void setSalarioMax(BigDecimal salarioMax) { this.salarioMax = salarioMax; }
+
+    public String getEstadoPago() { return estadoPago; }
+    public void setEstadoPago(String estadoPago) { this.estadoPago = estadoPago; }
+
+    public BigDecimal getHorasExtraMin() { return horasExtraMin; }
+    public void setHorasExtraMin(BigDecimal horasExtraMin) { this.horasExtraMin = horasExtraMin; }
+
+    public BigDecimal getHorasExtraMax() { return horasExtraMax; }
+    public void setHorasExtraMax(BigDecimal horasExtraMax) { this.horasExtraMax = horasExtraMax; }
 }

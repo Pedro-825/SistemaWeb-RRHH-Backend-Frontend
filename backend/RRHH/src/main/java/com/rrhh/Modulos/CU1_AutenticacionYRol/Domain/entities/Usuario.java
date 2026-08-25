@@ -29,6 +29,8 @@ public class Usuario implements Prototype<Usuario> {
     @Builder.Default
     private Boolean activo = true;
     private String numeroDi;
+    private Long idEmpleado;
+    private Boolean appMovilInstalada;
 
     public Long getId() {
         return id;
@@ -152,6 +154,22 @@ public class Usuario implements Prototype<Usuario> {
 
     public void setNumeroDi(String numeroDi) {
         this.numeroDi = numeroDi;
+    }
+
+    public Long getIdEmpleado() {
+        return idEmpleado;
+    }
+
+    public void setIdEmpleado(Long idEmpleado) {
+        this.idEmpleado = idEmpleado;
+    }
+
+    public Boolean getAppMovilInstalada() {
+        return appMovilInstalada;
+    }
+
+    public void setAppMovilInstalada(Boolean appMovilInstalada) {
+        this.appMovilInstalada = appMovilInstalada;
     }
 
     public boolean puedeIntentarLogin() {

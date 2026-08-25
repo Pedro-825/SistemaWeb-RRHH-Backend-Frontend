@@ -8,6 +8,9 @@ public class TwoFactorResponseDTO {
     private String token;
     private String rol;
     private boolean requiereCambioPassword;
+    private Long idEmpleado;
+    private String nombreUsuario;
+    private boolean appMovilInstalada;
 
     public TwoFactorResponseDTO() {
     }
@@ -63,4 +66,18 @@ public class TwoFactorResponseDTO {
     public void setRequiereCambioPassword(boolean requiereCambioPassword) {
         this.requiereCambioPassword = requiereCambioPassword;
     }
+
+    public Long getIdEmpleado() {
+        return idEmpleado;
+    }
+
+    public void setIdEmpleado(Long idEmpleado) {
+        this.idEmpleado = idEmpleado;
+    }
+
+    public String getNombreUsuario() { return nombreUsuario; }
+    public void setNombreUsuario(String nombreUsuario) { this.nombreUsuario = nombreUsuario; }
+
+    public boolean isAppMovilInstalada() { return appMovilInstalada; }
+    public void setAppMovilInstalada(boolean appMovilInstalada) { this.appMovilInstalada = appMovilInstalada; }
 }

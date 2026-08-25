@@ -8,6 +8,9 @@ import com.rrhh.Modulos.CU5_Reporte.Infrastructure.interfaces.JpaReporteEmpleado
 import com.rrhh.Modulos.CU5_Reporte.Infrastructure.interfaces.JpaReporteAsistenciaRepository;
 import com.rrhh.Modulos.CU5_Reporte.Infrastructure.interfaces.JpaReporteNominaRepository;
 import com.rrhh.Modulos.CU5_Reporte.Infrastructure.interfaces.JpaReporteSolicitudRepository;
+import com.rrhh.Modulos.CU5_Reporte.Infrastructure.specifications.ReporteAsistenciaSpecification;
+import com.rrhh.Modulos.CU5_Reporte.Infrastructure.specifications.ReporteEmpleadoSpecification;
+import com.rrhh.Modulos.CU5_Reporte.Infrastructure.specifications.ReporteNominaSpecification;
 import com.rrhh.Modulos.CU5_Reporte.Application.factory.IReporteFactory;
 import com.rrhh.Shared.export.ExportAbstractFactory;
 import com.rrhh.Shared.persistence.*;
@@ -68,13 +71,19 @@ public class ReporteService implements IReporteService {
     public ReporteResponseDTO generarReporteEmpleados(FiltroEmpleadoDTO filtro, Long idUsuario) {
 
         validarFiltroEmpleado(filtro);
+        validarFiltroFechas(filtro.getFechaIngresoInicio(), filtro.getFechaIngresoFin());
 
-        List<EmpleadoModel> empleados = jpaEmpleadoRepository.buscarConFiltros(
-            filtro.getEstado(),
-            filtro.getArea(),
-            filtro.getCargo(),
-            filtro.getTipoContrato(),
-            filtro.getIdEmpleado()
+        List<EmpleadoModel> empleados = jpaEmpleadoRepository.findAll(
+            ReporteEmpleadoSpecification.conFiltros(
+                normalizarTextoFiltro(filtro.getEstado()),
+                normalizarTextoFiltro(filtro.getArea()),
+                normalizarTextoFiltro(filtro.getCargo()),
+                normalizarTextoFiltro(filtro.getTipoContrato()),
+                filtro.getIdEmpleado(),
+                filtro.getFechaIngresoInicio() != null ? filtro.getFechaIngresoInicio().atStartOfDay() : null,
+                filtro.getFechaIngresoFin() != null ? filtro.getFechaIngresoFin().plusDays(1).atStartOfDay() : null,
+                normalizarTextoFiltro(filtro.getRol())
+            )
         );
 
         if (empleados.isEmpty()) {
@@ -101,13 +110,19 @@ public class ReporteService implements IReporteService {
     @Transactional(timeout = 30)
     public ReporteResponseDTO generarReporteAsistencia(FiltroAsistenciaDTO filtro, Long idUsuario) {
 
+        if (filtro == null) throw new IllegalArgumentException("Los filtros ingresados no son validos, verifique la informacion.");
         validarFiltroFechas(filtro.getFechaInicio(), filtro.getFechaFin());
 
-        List<RegistroAsistenciaModel> registros = jpaAsistenciaRepository.buscarConFiltros(
-            filtro.getIdEmpleado(),
-            filtro.getArea(),
-            filtro.getFechaInicio(),
-            filtro.getFechaFin()
+        List<RegistroAsistenciaModel> registros = jpaAsistenciaRepository.findAll(
+            ReporteAsistenciaSpecification.conFiltros(
+                filtro.getIdEmpleado(),
+                filtro.getArea(),
+                filtro.getFechaInicio(),
+                filtro.getFechaFin(),
+                filtro.getEstado(),
+                filtro.getTipoRegistro(),
+                filtro.getMinutosTardanzaMin()
+            )
         );
 
         if (registros.isEmpty()) {
@@ -137,15 +152,21 @@ public class ReporteService implements IReporteService {
     @Transactional(timeout = 30)
     public ReporteResponseDTO generarReporteNomina(FiltroNominaDTO filtro, Long idUsuario) {
 
+        if (filtro == null) throw new IllegalArgumentException("Los filtros ingresados no son validos, verifique la informacion.");
         validarFiltroFechas(filtro.getFechaInicio(), filtro.getFechaFin());
 
-        List<NominaModel> nominas = jpaNominaRepository.buscarConFiltros(
-            filtro.getIdEmpleado(),
-            filtro.getArea(),
-            filtro.getFechaInicio(),
-            filtro.getFechaFin(),
-            filtro.getSalarioMin(),
-            filtro.getSalarioMax()
+        List<NominaModel> nominas = jpaNominaRepository.findAll(
+            ReporteNominaSpecification.conFiltros(
+                filtro.getIdEmpleado(),
+                filtro.getArea(),
+                filtro.getFechaInicio(),
+                filtro.getFechaFin(),
+                filtro.getSalarioMin(),
+                filtro.getSalarioMax(),
+                filtro.getEstadoPago(),
+                filtro.getHorasExtraMin(),
+                filtro.getHorasExtraMax()
+            )
         );
 
         if (nominas.isEmpty()) {
@@ -176,6 +197,7 @@ public class ReporteService implements IReporteService {
     @Transactional(timeout = 30)
     public ReporteResponseDTO generarReporteSolicitudes(FiltroSolicitudDTO filtro, Long idUsuario) {
 
+        if (filtro == null) throw new IllegalArgumentException("Los filtros ingresados no son validos, verifique la informacion.");
         validarFiltroFechas(filtro.getFechaInicio(), filtro.getFechaFin());
 
         List<SolicitudModel> solicitudes = jpaSolicitudRepository.buscarConFiltros(
@@ -185,7 +207,9 @@ public class ReporteService implements IReporteService {
             filtro.getEstado(),
             filtro.getCargo(),
             filtro.getFechaInicio(),
-            filtro.getFechaFin()
+            filtro.getFechaFin(),
+            filtro.getDiasMin(),
+            filtro.getDiasMax()
         );
 
         if (solicitudes.isEmpty()) {
@@ -222,6 +246,17 @@ public class ReporteService implements IReporteService {
         }
     }
 
+    private String normalizarTextoFiltro(String valor) {
+        if (valor == null) {
+            return null;
+        }
+        String limpio = valor.trim();
+        if (limpio.isEmpty() || "TODOS".equalsIgnoreCase(limpio)) {
+            return null;
+        }
+        return limpio;
+    }
+
     private void validarFiltroFechas(java.time.LocalDate inicio, java.time.LocalDate fin) {
         if (inicio != null && fin != null && inicio.isAfter(fin)) {
             throw new IllegalArgumentException(
@@ -245,18 +280,20 @@ public class ReporteService implements IReporteService {
             default -> null;
         };
 
-        if (tabla != null) {
-            try {
-                Number dbCount = (Number) em.createNativeQuery(
-                        "SELECT COUNT(*) FROM " + tabla).getSingleResult();
-                if (size > dbCount.intValue()) {
-                    throw new IllegalStateException("Error de consistencia en reporte " + tipoReporte +
-                            ": " + size + " registros reportados superan los " + dbCount.intValue() +
-                            " registros en la base de datos.");
-                }
-            } catch (Exception ignore) {
-                // Si falla la consulta de conteo, se omite la validación
-            }
+        if (tabla == null) return;
+
+        Number dbCount;
+        try {
+            dbCount = (Number) em.createNativeQuery("SELECT COUNT(*) FROM " + tabla).getSingleResult();
+        } catch (Exception ignore) {
+            // Si falla la consulta de conteo, se omite la validación
+            return;
+        }
+
+        if (size > dbCount.intValue()) {
+            throw new IllegalStateException("Error de consistencia en reporte " + tipoReporte +
+                    ": " + size + " registros reportados superan los " + dbCount.intValue() +
+                    " registros en la base de datos.");
         }
     }
 

@@ -14,6 +14,10 @@ public interface JpaEmpleadoRepository extends JpaRepository<EmpleadoModel, Long
 
     boolean existsByNumeroDi(String numeroDi);
 
+    boolean existsByCorreoIgnoreCase(String correo);
+
+    java.util.Optional<EmpleadoModel> findByNumeroDi(String numeroDi);
+
     List<EmpleadoModel> findByEstado(String estado);
 
     List<EmpleadoModel> findByNumeroDiContainingIgnoreCaseOrNombresContainingIgnoreCaseOrApellidosContainingIgnoreCase(
@@ -30,17 +34,22 @@ public interface JpaEmpleadoRepository extends JpaRepository<EmpleadoModel, Long
     );
 
     @Query(value = """
-            SELECT DISTINCT e.*
+            SELECT e.*
             FROM empleado e
-            LEFT JOIN contrato c ON e.id_empleado = c.id_empleado
+            LEFT JOIN LATERAL (
+                SELECT c2.id_dpto, c2.cargo
+                FROM contrato c2
+                WHERE c2.id_empleado = e.id_empleado
+                ORDER BY c2.id_contrato DESC
+                LIMIT 1
+            ) c ON true
             LEFT JOIN departamento d ON d.id_dpto = c.id_dpto
             WHERE (:estado IS NULL OR e.estado = CAST(:estado AS TEXT))
               AND (:idDpto IS NULL OR d.id_dpto = :idDpto)
               AND (
-                    :cargo IS NULL 
+                    :cargo IS NULL
                     OR LOWER(c.cargo) LIKE LOWER(CONCAT('%', CAST(:cargo AS TEXT), '%'))
                   )
-              AND (c.estado = 'ACTIVO' OR c.estado IS NULL)
             """, nativeQuery = true)
     List<EmpleadoModel> buscarAvanzado(
             @Param("estado") String estado,
@@ -49,30 +58,40 @@ public interface JpaEmpleadoRepository extends JpaRepository<EmpleadoModel, Long
     );
 
     @Query(value = """
-            SELECT DISTINCT e.*
+            SELECT e.*
             FROM empleado e
-            LEFT JOIN contrato c ON e.id_empleado = c.id_empleado
+            LEFT JOIN LATERAL (
+                SELECT c2.id_dpto, c2.cargo
+                FROM contrato c2
+                WHERE c2.id_empleado = e.id_empleado
+                ORDER BY c2.id_contrato DESC
+                LIMIT 1
+            ) c ON true
             LEFT JOIN departamento d ON d.id_dpto = c.id_dpto
             WHERE (:estado IS NULL OR e.estado = CAST(:estado AS TEXT))
               AND (:idDpto IS NULL OR d.id_dpto = :idDpto)
               AND (
-                    :cargo IS NULL 
+                    :cargo IS NULL
                     OR LOWER(c.cargo) LIKE LOWER(CONCAT('%', CAST(:cargo AS TEXT), '%'))
                   )
-              AND (c.estado = 'ACTIVO' OR c.estado IS NULL)
             """,
             countQuery = """
-            SELECT COUNT(DISTINCT e.id_empleado)
+            SELECT COUNT(e.id_empleado)
             FROM empleado e
-            LEFT JOIN contrato c ON e.id_empleado = c.id_empleado
+            LEFT JOIN LATERAL (
+                SELECT c2.id_dpto, c2.cargo
+                FROM contrato c2
+                WHERE c2.id_empleado = e.id_empleado
+                ORDER BY c2.id_contrato DESC
+                LIMIT 1
+            ) c ON true
             LEFT JOIN departamento d ON d.id_dpto = c.id_dpto
             WHERE (:estado IS NULL OR e.estado = CAST(:estado AS TEXT))
               AND (:idDpto IS NULL OR d.id_dpto = :idDpto)
               AND (
-                    :cargo IS NULL 
+                    :cargo IS NULL
                     OR LOWER(c.cargo) LIKE LOWER(CONCAT('%', CAST(:cargo AS TEXT), '%'))
                   )
-              AND (c.estado = 'ACTIVO' OR c.estado IS NULL)
             """,
             nativeQuery = true)
     Page<EmpleadoModel> buscarAvanzadoPaginado(

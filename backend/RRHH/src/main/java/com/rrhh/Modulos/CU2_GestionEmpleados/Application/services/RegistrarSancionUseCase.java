@@ -14,6 +14,7 @@ import com.rrhh.Modulos.CU2_GestionEmpleados.Domain.repository.IUsuarioGestionRe
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.Year;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -66,10 +67,10 @@ public class RegistrarSancionUseCase {
             );
         }
 
-        if (dto == null || dto.getMotivo() == null || dto.getMotivo().isBlank()) {
+        if (dto == null || dto.getJustificacion() == null || dto.getJustificacion().isBlank()) {
             return new EmpleadoResponseDTO(
                     false,
-                    "Debe ingresar un motivo para la sanción",
+                    "Debe ingresar una justificación para la sanción",
                     empleado.getIdEmpleado(),
                     empleado.getNombres() + " " + empleado.getApellidos(),
                     null,
@@ -82,6 +83,8 @@ public class RegistrarSancionUseCase {
         }
 
         String estadoAnterior = empleado.getEstado();
+        boolean esSuspension = "SUSPENSION".equals(dto.getTipoSancion());
+        int dias = dto.getDiasSuspension();
 
         Sancion sancion = new Sancion();
 
@@ -90,11 +93,11 @@ public class RegistrarSancionUseCase {
         sancion.setCodigo(codigo);
 
         sancion.setIdEmpleado(empleado.getIdEmpleado());
-        sancion.setMotivo(dto.getMotivo());
-        sancion.setDescripcion(dto.getDescripcion());
-        sancion.setFechaInicio(dto.getFechaInicio());
-        sancion.setFechaFin(dto.getFechaFin());
-        sancion.setBloqueaAcceso(Boolean.TRUE.equals(dto.getBloquearAcceso()));
+        sancion.setMotivo(dto.getJustificacion());
+        sancion.setDescripcion("Tipo: " + dto.getTipoSancion());
+        sancion.setFechaInicio(LocalDate.now());
+        sancion.setFechaFin(esSuspension && dias > 0 ? LocalDate.now().plusDays(dias) : LocalDate.now());
+        sancion.setBloqueaAcceso(esSuspension);
         sancion.setEstado("ACTIVA");
 
         Sancion sancionGuardada = null;
@@ -115,7 +118,7 @@ public class RegistrarSancionUseCase {
         UsuarioGestion usuario =
                 usuarioRepository.findByEmpleadoId(idEmpleado);
 
-        if (usuario != null && Boolean.TRUE.equals(dto.getBloquearAcceso())) {
+        if (usuario != null && esSuspension) {
             usuario.desactivar();
             usuarioRepository.save(usuario);
 
@@ -133,8 +136,8 @@ public class RegistrarSancionUseCase {
         String valorNuevo =
                 "Codigo: " + sancionGuardada.getCodigo()
                         + " | Sancion ID: " + sancionGuardada.getIdSancion()
+                        + " | Tipo: " + dto.getTipoSancion()
                         + " | Motivo: " + sancionGuardada.getMotivo()
-                        + " | Descripción: " + sancionGuardada.getDescripcion()
                         + " | Inicio: " + sancionGuardada.getFechaInicio()
                         + " | Fin: " + sancionGuardada.getFechaFin()
                         + " | Bloquea acceso: " + sancionGuardada.getBloqueaAcceso()

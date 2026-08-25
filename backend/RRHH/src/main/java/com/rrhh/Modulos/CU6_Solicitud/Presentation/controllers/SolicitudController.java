@@ -75,15 +75,26 @@ public class SolicitudController {
 
     @GetMapping(SolicitudApiRoutes.POR_EMPLEADO)
     @PreAuthorize("hasAnyRole('RRHH', 'EMPLEADO')")
-    public ResponseEntity<List<SolicitudResponseDTO>> listarPorEmpleado(@PathVariable Long idEmpleado) {
+    public ResponseEntity<?> listarPorEmpleado(
+            @PathVariable Long idEmpleado,
+            @AuthenticationPrincipal AuthenticatedUser user) {
+        if (hayRol(user, "EMPLEADO") && !esPropio(idEmpleado, user)) {
+            return ResponseEntity.status(403).body("No tiene permiso para ver solicitudes de otro empleado.");
+        }
         return ResponseEntity.ok(solicitudService.listarPorEmpleado(idEmpleado));
     }
 
     @GetMapping(SolicitudApiRoutes.BUSCAR_ID)
     @PreAuthorize("hasAnyRole('RRHH', 'GERENCIA', 'EMPLEADO')")
-    public ResponseEntity<?> buscarPorId(@PathVariable Integer id) {
+    public ResponseEntity<?> buscarPorId(
+            @PathVariable Integer id,
+            @AuthenticationPrincipal AuthenticatedUser user) {
         try {
-            return ResponseEntity.ok(solicitudService.buscarPorId(id));
+            SolicitudResponseDTO solicitud = solicitudService.buscarPorId(id);
+            if (hayRol(user, "EMPLEADO") && !esPropio(solicitud.getIdEmpleado(), user)) {
+                return ResponseEntity.status(403).body("No tiene permiso para ver esta solicitud.");
+            }
+            return ResponseEntity.ok(solicitud);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.notFound().build();
         }
@@ -104,8 +115,30 @@ public class SolicitudController {
 
     @GetMapping("/api/v1/solicitudes/notificaciones/{idEmpleado}")
     @PreAuthorize("hasAnyRole('EMPLEADO', 'RRHH', 'GERENCIA')")
-    public ResponseEntity<List<SolicitudResponseDTO>> listarNotificaciones(
-            @PathVariable Long idEmpleado) {
+    public ResponseEntity<?> listarNotificaciones(
+            @PathVariable Long idEmpleado,
+            @AuthenticationPrincipal AuthenticatedUser user) {
+        if (hayRol(user, "EMPLEADO") && !esPropio(idEmpleado, user)) {
+            return ResponseEntity.status(403).body("No tiene permiso para ver notificaciones de otro empleado.");
+        }
         return ResponseEntity.ok(solicitudServiceImpl.listarNotificacionesPorEmpleado(idEmpleado));
+    }
+
+    @GetMapping("/api/v1/solicitudes/mi/saldo-vacaciones")
+    @PreAuthorize("hasRole('EMPLEADO')")
+    public ResponseEntity<?> obtenerMiSaldoVacaciones(@AuthenticationPrincipal AuthenticatedUser user) {
+        try {
+            return ResponseEntity.ok(java.util.Map.of("saldoVacaciones", solicitudService.obtenerSaldoVacaciones(user.getIdUsuario())));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    private boolean hayRol(AuthenticatedUser user, String rol) {
+        return user != null && user.getRol() != null && user.getRol().equalsIgnoreCase(rol);
+    }
+
+    private boolean esPropio(Long idEmpleado, AuthenticatedUser user) {
+        return idEmpleado != null && user != null && idEmpleado.equals(user.getIdEmpleado());
     }
 }

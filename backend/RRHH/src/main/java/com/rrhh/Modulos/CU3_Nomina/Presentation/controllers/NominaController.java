@@ -20,6 +20,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -143,74 +144,137 @@ public class NominaController {
 
     @PostMapping(NominaApiRoutes.BUSCAR_ID + "/enviar")
     @PreAuthorize("hasRole('RRHH')")
+    @Transactional
     public ResponseEntity<?> enviarComprobanteEmail(@PathVariable Integer id) {
         try {
             NominaResponseDTO nomina = nominaService.buscarNominaPorId(id);
-            byte[] pdf = nominaServicePdf.generarComprobantePDF(id);
-
-            var empleadoOpt = jpaEmpleadoRepository.findById(Objects.requireNonNull(nomina.getIdEmpleado()));
-            if (empleadoOpt.isEmpty()) {
-                return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Empleado no encontrado."));
-            }
-
-            var empleado = empleadoOpt.get();
-            String correo = empleado.getCorreo() != null ? empleado.getCorreo() : "";
-
-            UsuarioGestion usuario = usuarioGestionRepository.findByEmpleadoId(nomina.getIdEmpleado());
-            if (usuario != null && usuario.getCorreoInst() != null && !usuario.getCorreoInst().isBlank()) {
-                correo = usuario.getCorreoInst();
-            }
-
-            if (correo.isEmpty()) {
+            EnvioNominaResult resultado = enviarComprobante(nomina);
+            if (!resultado.success) {
                 return ResponseEntity.badRequest().body(Map.of("success", false, "message",
-                        "El empleado no tiene correo registrado."));
+                        resultado.message));
             }
-
-            String errorMsg = null;
-            boolean exito = false;
-
-            for (int intento = 1; intento <= 3; intento++) {
-                try {
-                    emailService.enviarComprobanteNomina(correo,
-                            empleado.getNombres() + " " + empleado.getApellidos(),
-                            nomina.getPeriodo(), pdf);
-
-                    NotificacionEnvioModel notif = new NotificacionEnvioModel();
-                    notif.setIdNomina(id);
-                    notif.setTipo("COMPROBANTE_NOMINA");
-                    notif.setEstado("ENVIADO");
-                    notif.setIntentos(intento);
-                    notif.setFechaEnvio(java.time.LocalDateTime.now());
-                    em.persist(notif);
-
-                    exito = true;
-                    break;
-                } catch (Exception e) {
-                    errorMsg = e.getMessage();
-                    if (intento < 3) {
-                        Thread.sleep(1000);
-                    }
-                }
-            }
-
-            if (exito) {
-                return ResponseEntity.ok(Map.of("success", true, "message",
-                        "Comprobante enviado a " + correo));
-            }
-
-            NotificacionEnvioModel notif = new NotificacionEnvioModel();
-            notif.setIdNomina(id);
-            notif.setTipo("COMPROBANTE_NOMINA");
-            notif.setEstado("FALLIDO");
-            notif.setIntentos(3);
-            notif.setError(errorMsg);
-            em.persist(notif);
-
-            return ResponseEntity.internalServerError()
-                    .body(Map.of("success", false, "message", "Error al enviar tras 3 intentos: " + errorMsg));
+            return ResponseEntity.ok(Map.of("success", true, "message", resultado.message));
         } catch (Exception e) {
             return ResponseEntity.internalServerError()
                     .body(Map.of("success", false, "message", "Error al enviar: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping(NominaApiRoutes.POR_PERIODO + "/enviar")
+    @PreAuthorize("hasRole('RRHH')")
+    @Transactional
+    public ResponseEntity<?> enviarComprobantesPeriodo(@PathVariable String periodo) {
+        try {
+            List<NominaResponseDTO> nominas = nominaService.buscarPorPeriodo(periodo);
+            if (nominas.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "success", false,
+                        "message", "No hay comprobantes calculados para el periodo " + periodo + "."
+                ));
+            }
+
+            List<Map<String, Object>> errores = new java.util.ArrayList<>();
+            int enviados = 0;
+            for (NominaResponseDTO nomina : nominas) {
+                EnvioNominaResult resultado = enviarComprobante(nomina);
+                if (resultado.success) {
+                    enviados++;
+                } else {
+                    errores.add(Map.of(
+                            "idNomina", nomina.getIdNomina(),
+                            "empleado", nomina.getNombreEmpleado() != null ? nomina.getNombreEmpleado() : "Empleado #" + nomina.getIdEmpleado(),
+                            "message", resultado.message
+                    ));
+                }
+            }
+
+            return ResponseEntity.ok(Map.of(
+                    "success", errores.isEmpty(),
+                    "message", errores.isEmpty()
+                            ? "Comprobantes enviados correctamente."
+                            : "Se enviaron " + enviados + " de " + nominas.size() + " comprobantes.",
+                    "total", nominas.size(),
+                    "enviados", enviados,
+                    "fallidos", errores.size(),
+                    "errores", errores
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("success", false, "message", "Error al enviar comprobantes: " + e.getMessage()));
+        }
+    }
+
+    private EnvioNominaResult enviarComprobante(NominaResponseDTO nomina) throws InterruptedException {
+        byte[] pdf = nominaServicePdf.generarComprobantePDF(nomina.getIdNomina());
+
+        var empleadoOpt = jpaEmpleadoRepository.findById(Objects.requireNonNull(nomina.getIdEmpleado()));
+        if (empleadoOpt.isEmpty()) {
+            return EnvioNominaResult.fail("Empleado no encontrado.");
+        }
+
+        var empleado = empleadoOpt.get();
+        UsuarioGestion usuario = usuarioGestionRepository.findByEmpleadoId(nomina.getIdEmpleado());
+
+        // El correo institucional (@hospitalsangabriel.com) es un identificador generado,
+        // no una casilla real: usarlo como destino de envío haría que el correo rebote siempre.
+        // Se prioriza el correo personal real; el institucional queda solo como respaldo.
+        String correo = empleado.getCorreo() != null && !empleado.getCorreo().isBlank()
+                ? empleado.getCorreo()
+                : (usuario != null && usuario.getCorreoInst() != null ? usuario.getCorreoInst() : "");
+
+        if (correo.isBlank()) {
+            return EnvioNominaResult.fail("El empleado no tiene correo registrado.");
+        }
+
+        String errorMsg = null;
+        for (int intento = 1; intento <= 3; intento++) {
+            try {
+                emailService.enviarComprobanteNomina(correo,
+                        empleado.getNombres() + " " + empleado.getApellidos(),
+                        nomina.getPeriodo(), pdf);
+
+                registrarNotificacion(nomina.getIdNomina(), "ENVIADO", intento, null);
+                return EnvioNominaResult.ok("Comprobante enviado a " + correo);
+            } catch (Exception e) {
+                errorMsg = e.getMessage();
+                if (intento < 3) {
+                    Thread.sleep(1000);
+                }
+            }
+        }
+
+        registrarNotificacion(nomina.getIdNomina(), "FALLIDO", 3, errorMsg);
+        return EnvioNominaResult.fail("Error al enviar tras 3 intentos: " + errorMsg);
+    }
+
+    private void registrarNotificacion(Integer idNomina, String estado, int intentos, String error) {
+        NotificacionEnvioModel notif = new NotificacionEnvioModel();
+        notif.setIdNomina(idNomina);
+        notif.setTipo("COMPROBANTE_NOMINA");
+        notif.setEstado(estado);
+        notif.setIntentos(intentos);
+        notif.setError(error);
+        if ("ENVIADO".equals(estado)) {
+            notif.setFechaEnvio(java.time.LocalDateTime.now());
+        }
+        em.persist(notif);
+    }
+
+    private static class EnvioNominaResult {
+        private final boolean success;
+        private final String message;
+
+        private EnvioNominaResult(boolean success, String message) {
+            this.success = success;
+            this.message = message;
+        }
+
+        private static EnvioNominaResult ok(String message) {
+            return new EnvioNominaResult(true, message);
+        }
+
+        private static EnvioNominaResult fail(String message) {
+            return new EnvioNominaResult(false, message);
         }
     }
 

@@ -15,6 +15,8 @@ public interface IEmpleadoRepository {
 
     boolean existsByNumeroDi(String numeroDi);
 
+    boolean existsByCorreo(String correo);
+
     List<Empleado> findAll();
 
     Page<Empleado> findAll(Pageable pageable);

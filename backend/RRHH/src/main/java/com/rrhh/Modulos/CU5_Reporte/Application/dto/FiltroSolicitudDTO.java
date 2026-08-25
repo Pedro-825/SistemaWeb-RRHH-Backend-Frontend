@@ -11,6 +11,8 @@ public class FiltroSolicitudDTO {
     private String tipoSolicitud;
     private String estado;
     private String cargo;
+    private Integer diasMin;
+    private Integer diasMax;
 
     public FiltroSolicitudDTO() {}
 
@@ -34,4 +36,10 @@ public class FiltroSolicitudDTO {
 
     public String getCargo() { return cargo; }
     public void setCargo(String cargo) { this.cargo = cargo; }
+
+    public Integer getDiasMin() { return diasMin; }
+    public void setDiasMin(Integer diasMin) { this.diasMin = diasMin; }
+
+    public Integer getDiasMax() { return diasMax; }
+    public void setDiasMax(Integer diasMax) { this.diasMax = diasMax; }
 }

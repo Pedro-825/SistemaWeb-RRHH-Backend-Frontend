@@ -9,6 +9,7 @@ public class MarcarAsistenciaManualRequestDTO {
     private LocalDateTime fechaHora;
     private String motivo;
     private String tipoRegistro = "ORIGINAL";
+    private Long idJustificacion;
 
     public Integer getIdEmpleado() { return idEmpleado; }
     public void setIdEmpleado(Integer idEmpleado) { this.idEmpleado = idEmpleado; }
@@ -24,4 +25,7 @@ public class MarcarAsistenciaManualRequestDTO {
 
     public String getTipoRegistro() { return tipoRegistro; }
     public void setTipoRegistro(String tipoRegistro) { this.tipoRegistro = tipoRegistro; }
+
+    public Long getIdJustificacion() { return idJustificacion; }
+    public void setIdJustificacion(Long idJustificacion) { this.idJustificacion = idJustificacion; }
 }

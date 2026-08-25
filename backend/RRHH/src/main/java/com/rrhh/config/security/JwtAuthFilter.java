@@ -68,6 +68,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String username = jwtConfig.obtenerUsername(token);
         String rol = jwtConfig.obtenerRol(token);
         Long idUsuario = jwtConfig.obtenerIdUsuario(token);
+        Long idEmpleado = jwtConfig.obtenerIdEmpleado(token);
 
         LocalDateTime tokenInvalidoDesde = jwtConfig.obtenerTokenInvalidoDesde(token);
         if (tokenInvalidoDesde != null
@@ -95,12 +96,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             AuthenticatedUser authenticatedUser =
                     new AuthenticatedUser(
                             idUsuario,
+                            idEmpleado,
                             username,
                             rol
                     );
 
             List<SimpleGrantedAuthority> authorities = new ArrayList<>();
-            authorities.add(new SimpleGrantedAuthority("ROLE_" + rol));
+            String authorityRole = rol.startsWith("ROLE_") ? rol : "ROLE_" + rol;
+            authorities.add(new SimpleGrantedAuthority(authorityRole));
 
             if (permisos != null) {
                 for (String permiso : permisos) {
@@ -121,15 +124,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         long tiempoRestante = jwtConfig.tiempoRestanteMs(token);
         if (tiempoRestante > 0 && tiempoRestante < 1000 * 60 * 5) {
             String nuevoToken = jwtConfig.refrescarToken(token);
-            response.setHeader("X-New-Token", nuevoToken);
-            ResponseCookie jwtCookie =
-                    ResponseCookie.from("jwt", nuevoToken)
-                            .httpOnly(true)
-                            .secure(false)
-                            .sameSite("Lax")
-                            .path("/")
-                            .maxAge(jwtConfig.getExpirationTime() / 1000)
-                            .build();
+            ResponseCookie jwtCookie = jwtConfig.crearCookieJwt(nuevoToken);
             response.addHeader("Set-Cookie", jwtCookie.toString());
         }
 

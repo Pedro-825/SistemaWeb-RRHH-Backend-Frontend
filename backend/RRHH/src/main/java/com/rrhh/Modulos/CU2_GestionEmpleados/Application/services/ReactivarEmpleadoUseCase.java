@@ -11,12 +11,14 @@ import com.rrhh.Modulos.CU2_GestionEmpleados.Domain.repository.IContratoReposito
 import com.rrhh.Modulos.CU2_GestionEmpleados.Domain.repository.IEmpleadoRepository;
 import com.rrhh.Modulos.CU2_GestionEmpleados.Domain.repository.ISancionRepository;
 import com.rrhh.Modulos.CU2_GestionEmpleados.Domain.repository.IUsuarioGestionRepository;
+import com.rrhh.Modulos.CU4_RegistroAsistencia.Application.services.HorarioService;
 
 import com.rrhh.Modulos.CU1_AutenticacionYRol.Infrastructure.interfaces.JpaUsuarioRepository;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -34,13 +36,16 @@ public class ReactivarEmpleadoUseCase {
 
     private final JpaUsuarioRepository jpaUsuarioRepository;
 
-    public ReactivarEmpleadoUseCase(IEmpleadoRepository empleadoRepository, ISancionRepository sancionRepository, IUsuarioGestionRepository usuarioRepository, IContratoRepository contratoRepository, AuditoriaEmpleadoService auditoriaEmpleadoService, JpaUsuarioRepository jpaUsuarioRepository) {
+    private final HorarioService horarioService;
+
+    public ReactivarEmpleadoUseCase(IEmpleadoRepository empleadoRepository, ISancionRepository sancionRepository, IUsuarioGestionRepository usuarioRepository, IContratoRepository contratoRepository, AuditoriaEmpleadoService auditoriaEmpleadoService, JpaUsuarioRepository jpaUsuarioRepository, HorarioService horarioService) {
         this.empleadoRepository = empleadoRepository;
         this.sancionRepository = sancionRepository;
         this.usuarioRepository = usuarioRepository;
         this.contratoRepository = contratoRepository;
         this.auditoriaEmpleadoService = auditoriaEmpleadoService;
         this.jpaUsuarioRepository = jpaUsuarioRepository;
+        this.horarioService = horarioService;
     }
 
     @Transactional
@@ -56,10 +61,10 @@ public class ReactivarEmpleadoUseCase {
             throw new RuntimeException("Empleado no encontrado");
         }
 
-        if (empleado.estaDesvinculado()) {
+        if (empleado.estaActivo()) {
             return new EmpleadoResponseDTO(
                     false,
-                    "No se puede reactivar un empleado desvinculado",
+                    "El empleado ya se encuentra activo",
                     empleado.getIdEmpleado(),
                     empleado.getNombres() + " " + empleado.getApellidos(),
                     null,
@@ -92,11 +97,16 @@ public class ReactivarEmpleadoUseCase {
         Empleado empleadoGuardado =
                 empleadoRepository.save(empleado);
 
+        horarioService.cerrarAsignacionesActivas(idEmpleado, LocalDate.now());
+
         UsuarioGestion usuario =
                 usuarioRepository.findByEmpleadoId(idEmpleado);
 
         if (usuario != null) {
             usuario.activar();
+            // Al reactivar se le pide reconfigurar el 2FA desde cero (como si fuera
+            // primer acceso), en vez de arrastrar el secreto de la vinculacion anterior.
+            usuario.setDosfaActivo(false);
             usuarioRepository.save(usuario);
 
             jpaUsuarioRepository.findByEmpleadoIdEmpleado(idEmpleado).ifPresent(model -> {

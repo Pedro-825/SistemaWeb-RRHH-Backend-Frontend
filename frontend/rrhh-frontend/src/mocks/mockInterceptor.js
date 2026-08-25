@@ -116,6 +116,9 @@ const SOL_EMP1 = [
   mkSol(490, 1, "Ana García López", "PERMISO",    "RECHAZADO",  "2026-04-20", "2026-04-21",  2, "Consulta médica, sin certificado adjunto.", "Documentación incompleta.", "Sin respaldo documental, rechazado."),
 ];
 
+// Solicitudes dinámicas agregadas durante la sesión mock
+const SOL_NUEVAS = [];
+
 const SOL_BY_ESTADO = {
   PENDIENTE:   SOL_PENDIENTE,
   EN_REVISION: SOL_EN_REVISION,
@@ -277,7 +280,26 @@ window.fetch = async (url, opts = {}) => {
   }
 
   // ── SOLICITUDES ───────────────────────────────────────────────
-  if (path === '/api/solicitud/registrar')  return ok();
+  if (path === '/api/solicitud/registrar' && method === 'POST') {
+    const nuevaId = 600 + SOL_NUEVAS.length + 1;
+    const nuevaSol = {
+      idSolicitud:   nuevaId,
+      idEmpleado:    1,
+      nombreEmpleado: "Ana García López",
+      tipoSolicitud:  body?.tipoSolicitud ?? "OTROS",
+      fechaInicio:    body?.fechaInicio   ?? null,
+      fechaFin:       body?.fechaFin      ?? null,
+      diasSolicitados: 1,
+      motivo:         body?.motivo        ?? "",
+      estado:         "PENDIENTE",
+      observacionRrhh: null,
+      respuesta:       null,
+    };
+    SOL_NUEVAS.push(nuevaSol);
+    SOL_PENDIENTE.push(mkSol(nuevaId, 1, "Ana García López", nuevaSol.tipoSolicitud, "PENDIENTE",
+      nuevaSol.fechaInicio, nuevaSol.fechaFin, 1, nuevaSol.motivo));
+    return jsonOk(nuevaSol);
+  }
   if (path === '/api/solicitud/revisar')    return ok();
   if (path === '/api/solicitud/decidir')    return ok();
 
@@ -288,7 +310,7 @@ window.fetch = async (url, opts = {}) => {
 
   if (/^\/api\/solicitud\/empleado\/\d+/.test(path)) {
     const id = pathId(path, 'empleado');
-    return jsonOk(id === 1 ? SOL_EMP1 : []);
+    return jsonOk(id === 1 ? [...SOL_EMP1, ...SOL_NUEVAS] : []);
   }
 
   // ── REPORTES ──────────────────────────────────────────────────

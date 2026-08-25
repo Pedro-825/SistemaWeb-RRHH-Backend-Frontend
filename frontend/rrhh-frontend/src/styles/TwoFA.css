@@ -207,6 +207,20 @@
   border-color: #cbd5e1;
 }
 
+@media (max-width: 420px) {
+  .twofa-card {
+    padding: 28px 20px 24px;
+  }
+  .twofa-code-box {
+    gap: 8px;
+  }
+  .twofa-code-box input {
+    width: 40px;
+    height: 48px;
+    font-size: 20px;
+  }
+}
+
 .twofa-hint {
   margin-top: 16px;
   font-size: 12px;

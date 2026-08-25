@@ -61,6 +61,7 @@ public class Empleado {
 
     public void activar() {
         this.estado = "ACTIVO";
+        this.fechaDesvinculacion = null;
     }
 
     public Long getIdEmpleado() {
